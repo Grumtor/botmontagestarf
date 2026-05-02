@@ -1,0 +1,38 @@
+# Railway deployment configuration.
+#
+# This project deploys as multiple services in a single Railway project:
+#   1. postgres   — Railway's managed Postgres plugin
+#   2. redis      — Railway's managed Redis plugin
+#   3. backend    — FastAPI service (root: ./backend, Dockerfile build)
+#   4. worker     — Celery worker (same repo + Dockerfile, custom start cmd)
+#   5. frontend   — Next.js service (root: ./frontend, Dockerfile build)
+#
+# Each service holds its own service-level config in Railway. Set the
+# "Root Directory" of each code-based service to ./backend or ./frontend
+# in the Railway UI so it picks up the correct Dockerfile.
+#
+# Environment variables to set per service (Railway → Variables):
+#
+#   backend / worker:
+#     DATABASE_URL         (from postgres plugin reference)
+#     REDIS_URL            (from redis plugin reference)
+#     CELERY_BROKER_URL    = ${{REDIS_URL}}
+#     CELERY_RESULT_BACKEND= ${{REDIS_URL}}
+#     BACKEND_PASSWORD     (your chosen login password)
+#     JWT_SECRET           (random 64-char string, same on backend + frontend)
+#     CORS_ORIGINS         (https URL of your frontend service)
+#
+#   worker only — override start command in Railway:
+#     celery -A app.celery_app.celery_app worker --loglevel=info
+#
+#   frontend:
+#     BACKEND_URL          (internal Railway URL of backend service)
+#     JWT_SECRET           (same value as backend)
+#     NEXT_TELEMETRY_DISABLED = 1
+
+[build]
+builder = "DOCKERFILE"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

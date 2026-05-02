@@ -1,0 +1,178 @@
+{
+  "USA": {
+    "country_code": "US",
+    "country_name": "United States of America",
+    "language": "en-US",
+    "tz_offset_hours": -5,
+    "lat_range": [25, 49],
+    "lon_range": [-125, -67],
+    "cities": [
+      { "city": "Houston", "state": "Texas", "lat": 29.7604, "lon": -95.3698 },
+      { "city": "Miami", "state": "Florida", "lat": 25.7617, "lon": -80.1918 },
+      { "city": "Los Angeles", "state": "California", "lat": 34.0522, "lon": -118.2437 },
+      { "city": "New York", "state": "New York", "lat": 40.7128, "lon": -74.0060 },
+      { "city": "Chicago", "state": "Illinois", "lat": 41.8781, "lon": -87.6298 },
+      { "city": "Phoenix", "state": "Arizona", "lat": 33.4484, "lon": -112.0740 },
+      { "city": "Atlanta", "state": "Georgia", "lat": 33.7490, "lon": -84.3880 },
+      { "city": "Dallas", "state": "Texas", "lat": 32.7767, "lon": -96.7970 },
+      { "city": "San Diego", "state": "California", "lat": 32.7157, "lon": -117.1611 },
+      { "city": "Las Vegas", "state": "Nevada", "lat": 36.1699, "lon": -115.1398 }
+    ]
+  },
+  "Canada": {
+    "country_code": "CA",
+    "country_name": "Canada",
+    "language": "en-CA",
+    "tz_offset_hours": -5,
+    "lat_range": [42, 70],
+    "lon_range": [-141, -52],
+    "cities": [
+      { "city": "Toronto", "state": "Ontario", "lat": 43.6532, "lon": -79.3832 },
+      { "city": "Montreal", "state": "Quebec", "lat": 45.5017, "lon": -73.5673 },
+      { "city": "Vancouver", "state": "British Columbia", "lat": 49.2827, "lon": -123.1207 },
+      { "city": "Calgary", "state": "Alberta", "lat": 51.0447, "lon": -114.0719 }
+    ]
+  },
+  "France": {
+    "country_code": "FR",
+    "country_name": "France",
+    "language": "fr-FR",
+    "tz_offset_hours": 1,
+    "lat_range": [41, 51],
+    "lon_range": [-5, 10],
+    "cities": [
+      { "city": "Paris", "state": "Île-de-France", "lat": 48.8566, "lon": 2.3522 },
+      { "city": "Marseille", "state": "Provence-Alpes-Côte d'Azur", "lat": 43.2965, "lon": 5.3698 },
+      { "city": "Lyon", "state": "Auvergne-Rhône-Alpes", "lat": 45.7640, "lon": 4.8357 },
+      { "city": "Toulouse", "state": "Occitanie", "lat": 43.6047, "lon": 1.4442 },
+      { "city": "Nice", "state": "Provence-Alpes-Côte d'Azur", "lat": 43.7102, "lon": 7.2620 },
+      { "city": "Bordeaux", "state": "Nouvelle-Aquitaine", "lat": 44.8378, "lon": -0.5792 }
+    ]
+  },
+  "UK": {
+    "country_code": "GB",
+    "country_name": "United Kingdom",
+    "language": "en-GB",
+    "tz_offset_hours": 0,
+    "lat_range": [49, 60],
+    "lon_range": [-8, 2],
+    "cities": [
+      { "city": "London", "state": "England", "lat": 51.5074, "lon": -0.1278 },
+      { "city": "Manchester", "state": "England", "lat": 53.4808, "lon": -2.2426 },
+      { "city": "Birmingham", "state": "England", "lat": 52.4862, "lon": -1.8904 },
+      { "city": "Edinburgh", "state": "Scotland", "lat": 55.9533, "lon": -3.1883 }
+    ]
+  },
+  "Spain": {
+    "country_code": "ES",
+    "country_name": "Spain",
+    "language": "es-ES",
+    "tz_offset_hours": 1,
+    "lat_range": [36, 44],
+    "lon_range": [-10, 4],
+    "cities": [
+      { "city": "Madrid", "state": "Comunidad de Madrid", "lat": 40.4168, "lon": -3.7038 },
+      { "city": "Barcelona", "state": "Catalonia", "lat": 41.3851, "lon": 2.1734 },
+      { "city": "Valencia", "state": "Comunidad Valenciana", "lat": 39.4699, "lon": -0.3763 },
+      { "city": "Seville", "state": "Andalusia", "lat": 37.3891, "lon": -5.9845 }
+    ]
+  },
+  "Italy": {
+    "country_code": "IT",
+    "country_name": "Italy",
+    "language": "it-IT",
+    "tz_offset_hours": 1,
+    "lat_range": [36, 47],
+    "lon_range": [6, 19],
+    "cities": [
+      { "city": "Rome", "state": "Lazio", "lat": 41.9028, "lon": 12.4964 },
+      { "city": "Milan", "state": "Lombardy", "lat": 45.4642, "lon": 9.1900 },
+      { "city": "Naples", "state": "Campania", "lat": 40.8518, "lon": 14.2681 },
+      { "city": "Florence", "state": "Tuscany", "lat": 43.7696, "lon": 11.2558 }
+    ]
+  },
+  "Germany": {
+    "country_code": "DE",
+    "country_name": "Germany",
+    "language": "de-DE",
+    "tz_offset_hours": 1,
+    "lat_range": [47, 55],
+    "lon_range": [6, 15],
+    "cities": [
+      { "city": "Berlin", "state": "Berlin", "lat": 52.5200, "lon": 13.4050 },
+      { "city": "Munich", "state": "Bavaria", "lat": 48.1351, "lon": 11.5820 },
+      { "city": "Hamburg", "state": "Hamburg", "lat": 53.5511, "lon": 9.9937 },
+      { "city": "Frankfurt", "state": "Hesse", "lat": 50.1109, "lon": 8.6821 }
+    ]
+  },
+  "Mexico": {
+    "country_code": "MX",
+    "country_name": "Mexico",
+    "language": "es-MX",
+    "tz_offset_hours": -6,
+    "lat_range": [14, 33],
+    "lon_range": [-118, -86],
+    "cities": [
+      { "city": "Mexico City", "state": "CDMX", "lat": 19.4326, "lon": -99.1332 },
+      { "city": "Guadalajara", "state": "Jalisco", "lat": 20.6597, "lon": -103.3496 },
+      { "city": "Monterrey", "state": "Nuevo León", "lat": 25.6866, "lon": -100.3161 },
+      { "city": "Cancún", "state": "Quintana Roo", "lat": 21.1619, "lon": -86.8515 }
+    ]
+  },
+  "Brazil": {
+    "country_code": "BR",
+    "country_name": "Brazil",
+    "language": "pt-BR",
+    "tz_offset_hours": -3,
+    "lat_range": [-34, 5],
+    "lon_range": [-74, -34],
+    "cities": [
+      { "city": "São Paulo", "state": "São Paulo", "lat": -23.5505, "lon": -46.6333 },
+      { "city": "Rio de Janeiro", "state": "Rio de Janeiro", "lat": -22.9068, "lon": -43.1729 },
+      { "city": "Brasília", "state": "Distrito Federal", "lat": -15.8267, "lon": -47.9218 },
+      { "city": "Salvador", "state": "Bahia", "lat": -12.9714, "lon": -38.5014 }
+    ]
+  },
+  "Australia": {
+    "country_code": "AU",
+    "country_name": "Australia",
+    "language": "en-AU",
+    "tz_offset_hours": 10,
+    "lat_range": [-43, -10],
+    "lon_range": [113, 154],
+    "cities": [
+      { "city": "Sydney", "state": "New South Wales", "lat": -33.8688, "lon": 151.2093 },
+      { "city": "Melbourne", "state": "Victoria", "lat": -37.8136, "lon": 144.9631 },
+      { "city": "Brisbane", "state": "Queensland", "lat": -27.4698, "lon": 153.0251 },
+      { "city": "Perth", "state": "Western Australia", "lat": -31.9505, "lon": 115.8605 }
+    ]
+  },
+  "Japan": {
+    "country_code": "JP",
+    "country_name": "Japan",
+    "language": "ja-JP",
+    "tz_offset_hours": 9,
+    "lat_range": [24, 46],
+    "lon_range": [123, 146],
+    "cities": [
+      { "city": "Tokyo", "state": "Tokyo", "lat": 35.6762, "lon": 139.6503 },
+      { "city": "Osaka", "state": "Osaka", "lat": 34.6937, "lon": 135.5023 },
+      { "city": "Kyoto", "state": "Kyoto", "lat": 35.0116, "lon": 135.7681 },
+      { "city": "Yokohama", "state": "Kanagawa", "lat": 35.4437, "lon": 139.6380 }
+    ]
+  },
+  "Netherlands": {
+    "country_code": "NL",
+    "country_name": "Netherlands",
+    "language": "nl-NL",
+    "tz_offset_hours": 1,
+    "lat_range": [50, 54],
+    "lon_range": [3, 7],
+    "cities": [
+      { "city": "Amsterdam", "state": "North Holland", "lat": 52.3676, "lon": 4.9041 },
+      { "city": "Rotterdam", "state": "South Holland", "lat": 51.9244, "lon": 4.4777 },
+      { "city": "The Hague", "state": "South Holland", "lat": 52.0705, "lon": 4.3007 },
+      { "city": "Utrecht", "state": "Utrecht", "lat": 52.0907, "lon": 5.1214 }
+    ]
+  }
+}

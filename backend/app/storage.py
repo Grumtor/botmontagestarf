@@ -1,0 +1,77 @@
+import logging
+import shutil
+from pathlib import Path
+from typing import Optional
+
+log = logging.getLogger(__name__)
+
+DATA_DIR = Path("/data")
+SOURCES_DIR = DATA_DIR / "sources"
+SOURCE_THUMBS_DIR = SOURCES_DIR / "thumbs"
+ASSETS_DIR = DATA_DIR / "assets"
+RENDERS_DIR = DATA_DIR / "renders"
+
+ASSET_DIRS: dict[str, Path] = {
+    "image": ASSETS_DIR / "images",
+    "gif": ASSETS_DIR / "gifs",
+    "emoji": ASSETS_DIR / "emojis",
+    "font": ASSETS_DIR / "fonts",
+    "audio": ASSETS_DIR / "audio",
+}
+
+# Built-in (non-deletable) font slugs and their candidate source paths
+# from the apt packages installed by the Dockerfile. We try each path
+# until one exists, then copy it to /data/assets/fonts/{slug}{ext}.
+BUILTIN_FONTS_META: dict[str, str] = {
+    "inter": "Inter",
+    "montserrat": "Montserrat",
+}
+
+BUILTIN_FONT_SOURCES: dict[str, list[str]] = {
+    "inter": [
+        "/usr/share/fonts/opentype/inter/Inter.otf",
+        "/usr/share/fonts/opentype/inter/Inter-Regular.otf",
+        "/usr/share/fonts/truetype/inter/Inter-Regular.ttf",
+        "/usr/share/fonts/inter/Inter-Regular.otf",
+        "/usr/share/fonts/inter/Inter-VariableFont_slnt,wght.ttf",
+    ],
+    "montserrat": [
+        "/usr/share/fonts/truetype/montserrat/Montserrat-Regular.ttf",
+        "/usr/share/fonts/opentype/montserrat/Montserrat-Regular.otf",
+    ],
+}
+
+
+def ensure_dirs() -> None:
+    for d in (SOURCES_DIR, SOURCE_THUMBS_DIR, ASSETS_DIR, RENDERS_DIR, *ASSET_DIRS.values()):
+        d.mkdir(parents=True, exist_ok=True)
+
+
+def builtin_font_path(font_id: str) -> Optional[Path]:
+    if font_id not in BUILTIN_FONTS_META:
+        return None
+    for ext in (".otf", ".ttf"):
+        p = ASSET_DIRS["font"] / f"{font_id}{ext}"
+        if p.is_file():
+            return p
+    return None
+
+
+def install_builtin_fonts() -> None:
+    """Copy bundled Inter/Montserrat from the apt packages to /data/assets/fonts.
+    No-op if the destination already exists."""
+    for font_id, candidates in BUILTIN_FONT_SOURCES.items():
+        if builtin_font_path(font_id) is not None:
+            continue
+        for candidate in candidates:
+            src = Path(candidate)
+            if src.is_file():
+                dst = ASSET_DIRS["font"] / f"{font_id}{src.suffix}"
+                shutil.copy(src, dst)
+                log.info("Installed built-in font %s from %s", font_id, src)
+                break
+        else:
+            log.warning(
+                "Built-in font %r not installed: none of the candidate paths exist (apt package missing?)",
+                font_id,
+            )

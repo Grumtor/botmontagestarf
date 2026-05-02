@@ -1,0 +1,41 @@
+# Env
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+.next/
+.turbo/
+out/
+dist/
+build/
+*.log
+npm-debug.log*
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+postgres_data/
+
+# Media (renders, uploaded clips, etc. — adjust to taste)
+backend/media/
+backend/uploads/
