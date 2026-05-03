@@ -226,7 +226,7 @@ export type TemplateUpdateInput = z.infer<typeof TemplateUpdateSchema>;
 
 const ClipUploadResponseSchema = z.object({
   file_id: z.string(),
-  kind: z.enum(["video", "image"]).default("video"),
+  kind: z.enum(["video", "image"]),
   duration_sec: z.number().nullable(),
   width: z.number().nullable(),
   height: z.number().nullable(),
