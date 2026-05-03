@@ -155,13 +155,19 @@ def build_render_command(
     fps: int = 30,
     crf: int = 18,
     preset: str = "slow",
+    text_png_inputs: Optional[dict[str, Path]] = None,
 ) -> list[str]:
     """Build the full ffmpeg argv for one render.
 
     `clips` is the full sequence (fixed + already-resolved placeholders).
     `overlay_inputs` maps layer.id → OverlayInput for each visual layer
     that needs an additional input file.
+    `text_png_inputs` maps text-layer.id → pre-rendered transparent PNG path
+    (canvas-sized) for text layers containing emojis. When present we use
+    an `overlay` filter at (0,0) instead of drawtext, so emoji glyphs that
+    would tofu under FreeType ("NO GLYPH") get rendered as Apple PNGs.
     """
+    text_png_inputs = text_png_inputs or {}
     inputs: list[str] = []
     next_idx = 0
     clip_input_indices: list[int] = []
@@ -194,6 +200,13 @@ def build_render_command(
             inputs.extend(["-ignore_loop", "0"])
         inputs.extend(["-i", str(ov.path)])
         overlay_layer_input_idx[layer_id] = next_idx
+        next_idx += 1
+
+    # 2b. Inputs for each pre-rendered text PNG (canvas-sized, transparent).
+    text_png_input_idx: dict[str, int] = {}
+    for layer_id, png_path in text_png_inputs.items():
+        inputs.extend(["-i", str(png_path)])
+        text_png_input_idx[layer_id] = next_idx
         next_idx += 1
 
     # 3. Build the filter graph: per-clip trim + scale + concat
@@ -281,9 +294,27 @@ def build_render_command(
         layer_type = layer.get("type")
 
         if layer_type == "text":
-            font_path = _resolve_font_path(layer, font_paths)
             text = str((layer.get("data") or {}).get("text", ""))
-            if not font_path or not text:
+            if not text:
+                continue
+            layer_id = layer.get("id")
+            png_idx = text_png_input_idx.get(layer_id) if layer_id else None
+            start = float(layer.get("start_time", 0))
+            end = float(layer.get("end_time", 0))
+
+            if png_idx is not None:
+                # Pre-rendered Apple-emoji-aware PNG; overlay full canvas.
+                next_label = f"tx{i}"
+                chains.append(
+                    f"[{current_v}][{png_idx}:v]"
+                    f"overlay=0:0:enable='between(t\\,{start}\\,{end})'"
+                    f"[{next_label}]"
+                )
+                current_v = next_label
+                continue
+
+            font_path = _resolve_font_path(layer, font_paths)
+            if not font_path:
                 continue
             next_label = f"tx{i}"
             chains.append(

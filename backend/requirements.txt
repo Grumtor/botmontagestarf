@@ -11,3 +11,5 @@ bcrypt==4.2.1
 PyJWT==2.10.1
 python-multipart==0.0.20
 mutagen==1.47.0
+Pillow==11.0.0
+regex==2024.11.6

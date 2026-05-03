@@ -17,9 +17,16 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Asset, AssetType, Template
 from app.render.pipeline import (
+    OUTPUT_H,
+    OUTPUT_W,
     ClipInput,
     OverlayInput,
     build_render_command,
+)
+from app.render.text_renderer import (
+    cache_key_for_layer,
+    render_text_layer_to_png,
+    text_contains_emoji,
 )
 from app.storage import (
     PLACEHOLDER_PREVIEW_PATH,
@@ -218,6 +225,59 @@ def gather_render_inputs(
     )
 
 
+def _render_text_pngs(
+    ctx: "RenderContext",
+    output_path: Path,
+    output_w: int,
+    output_h: int,
+) -> dict[str, Path]:
+    """For each text layer that contains an emoji, render a transparent
+    canvas-sized PNG combining the text run with Apple emoji glyphs. The
+    pipeline then overlays that PNG instead of running drawtext (which
+    would tofu the emoji codepoints). Cached by content hash so identical
+    captions across a batch only render once.
+    """
+    out: dict[str, Path] = {}
+    cache_dir = output_path.parent / "_text_pngs"
+    for layer in ctx.layers:
+        if layer.get("type") != "text":
+            continue
+        data = layer.get("data") or {}
+        text = str(data.get("text") or "")
+        if not text or not text_contains_emoji(text):
+            continue
+        layer_id = layer.get("id")
+        if not layer_id:
+            continue
+        font_id = data.get("font_id", "inter")
+        font_path = (
+            ctx.font_paths.get(font_id)
+            or ctx.font_paths.get("inter")
+            or next(iter(ctx.font_paths.values()), None)
+        )
+        if not font_path:
+            log.warning("text layer %s has emoji but no font path; falling back to drawtext", layer_id)
+            continue
+        key = cache_key_for_layer(layer, output_w, output_h)
+        png_path = cache_dir / f"{key}.png"
+        if not png_path.is_file():
+            try:
+                rendered = render_text_layer_to_png(
+                    layer=layer,
+                    font_path=font_path,
+                    output_w=output_w,
+                    output_h=output_h,
+                    out_path=png_path,
+                )
+                if rendered is None:
+                    continue
+            except Exception as e:
+                log.exception("render_text_layer_to_png failed for layer %s: %s", layer_id, e)
+                continue
+        out[str(layer_id)] = png_path
+    return out
+
+
 def run_render(
     *,
     template: Template,
@@ -228,6 +288,7 @@ def run_render(
     timeout: int = 1800,
 ) -> None:
     """Invoke ffmpeg synchronously; raise on failure."""
+    text_png_inputs = _render_text_pngs(ctx, output_path, OUTPUT_W, OUTPUT_H)
     cmd = build_render_command(
         clips=ctx.clips,
         overlay_inputs=ctx.overlay_inputs,
@@ -238,6 +299,7 @@ def run_render(
         output_path=output_path,
         crf=crf,
         preset=preset,
+        text_png_inputs=text_png_inputs,
     )
     log.info("ffmpeg %s", " ".join(cmd))
     try:

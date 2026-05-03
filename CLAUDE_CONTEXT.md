@@ -2,7 +2,7 @@
 
 > Document interne pour Claude. À lire en cas de perte de contexte. À mettre à jour à chaque prompt/changement majeur.
 >
-> **Last updated**: après Phase 5 (wizard 3 étapes `/render/new` + Apple emojis via emoji-mart)
+> **Last updated**: après Phase 6 (Apple emojis dans le rendu ffmpeg via Pillow + emoji-datasource-apple)
 > **Next planned**: appliquer les recommandations du rapport UX agent (Top 5 problèmes + polish) — voir section 13
 
 ---
@@ -69,7 +69,7 @@ L'app a vécu un **pivot majeur entre la Phase 1 originelle et la Phase 1 du mod
 │
 ├── backend/
 │   ├── Dockerfile                     ← ffmpeg, exiftool, atomicparsley, fonts-inter, fonts-montserrat, fonts-noto-color-emoji
-│   ├── requirements.txt
+│   ├── requirements.txt           ← + Pillow, regex (Phase 6 — Apple emoji compositor)
 │   ├── alembic.ini
 │   ├── alembic/versions/
 │   │   ├── 0001_initial.py            ← tables initiales (legacy schema)
@@ -99,8 +99,10 @@ L'app a vécu un **pivot majeur entre la Phase 1 originelle et la Phase 1 du mod
 │       │   ├── render.py              ← POST /api/render/upload (token), POST /preview
 │       │   └── jobs.py                ← POST /api/render/batch, GET /jobs, /jobs/{id}, /dashboard/stats
 │       ├── render/
-│       │   ├── pipeline.py            ← build_render_command (clip-based, drawtext, overlays, audio mix)
-│       │   ├── batch_runner.py        ← gather_render_inputs (résolution file_id/token → Path), run_render
+│       │   ├── pipeline.py            ← build_render_command (clip-based, drawtext, overlays, audio mix). text_png_inputs détourne drawtext vers overlay (Phase 6)
+│       │   ├── batch_runner.py        ← gather_render_inputs + run_render. _render_text_pngs pré-génère les PNGs Apple-emoji (Phase 6)
+│       │   ├── text_renderer.py       ← Pillow compositor texte + Apple emojis (Phase 6)
+│       │   ├── emoji_pack.py          ← lazy fetch + cache PNGs Apple emoji depuis jsdelivr (Phase 6)
 │       │   ├── metadata.py            ← apply_quicktime_metadata (ftyp patch + mutagen + exiftool)
 │       │   └── countries.json         ← 12 pays avec villes/GPS/timezone
 │       └── tasks/
@@ -262,9 +264,13 @@ L'app a vécu un **pivot majeur entre la Phase 1 originelle et la Phase 1 du mod
 │       └── preview.mp4           ← cache du dernier "Aperçu rendu" déclenché par l'éditeur
 ├── temp/
 │   └── {token}.{ext}             ← user-uploaded videos pending render (cleaned after job)
+├── apple_emojis/                 ← lazy cache des PNGs emoji-datasource-apple (Phase 6)
+│   └── {unified}.png             ← ex: 1f600.png, 1f44d-1f3fc.png, 1f468-200d-1f4bb.png
 └── renders/
     ├── {job_id}/
-    │   └── *.mp4                 ← outputs du batch
+    │   ├── *.mp4                 ← outputs du batch
+    │   └── _text_pngs/           ← caches des layers texte avec emoji (Phase 6)
+    │       └── {hash}.png        ← canvas-sized RGBA, dedupé par contenu de layer
     └── {job_id}.zip              ← ZIP final
 ```
 
@@ -443,6 +449,7 @@ L'app a vécu un **pivot majeur entre la Phase 1 originelle et la Phase 1 du mod
 | **Pivot Phase 2.6** | mai 2026 | Détails : emoji picker 80 emojis, timeline resizable (drag handle, persisted localStorage), template card play overlay → video preview, backend cache preview MP4 dans `/data/templates/{id}/preview.mp4`, `_placeholder_preview.mp4` 30s noir pour previews avec placeholders non remplis, fonts-noto-color-emoji ajouté au Dockerfile. |
 | **Phase 3** | mai 2026 | Dialog "Lance un render" sur chaque card template (`run-render-dialog.tsx`). Une dropzone par placeholder, multi-files. Upload via `Render.uploadUserVideo` (token). Rule de pairing : N vidéos par placeholder, même N pour tous → N reels. Pour 0 placeholder = 1 reel. Spoofing toggle avec MODELS / COUNTRIES / LANGUAGES / dateWindow. POST `/api/render/batch` puis `router.push("/jobs/{id}")`. Bouton "Lance un render" violet primaire en bas de chaque card. State `runRenderTarget` dans templates/page.tsx. |
 | **Phase 4** | mai 2026 | (a) Cleanup : drop `store/index.ts`, `dropzone.tsx`, `upload-list.tsx` (orphelins). (b) `/data/temp` cleanup auto au boot (fichiers > 24h). (c) **Image clips on main track** : nouveau ClipType `image`, schéma zod `ImageClipSchema`, store `addImageClip`, helper `makeImageClip`, action bar bouton "+ Image" (icône `ImagePlus`), upload accepte PNG/JPG, pipeline `is_image: True` → ffmpeg input `-loop 1 -framerate FPS -t duration -i path`, audio toujours silent pour image. Color `bg-emerald-700/80` dans clip-track. Drop overlay "+ Image" button (les images vont sur la track principale ; GIF/Emoji restent en overlay). (d) **Magnetic snap** : layer blocks snappent aux clip boundaries (start/end de chaque clip + 0 + total + playhead) avec threshold ~10px. Helper `snapTo()` dans `editor-timeline.tsx`. (e) Dashboard : bouton "Lancer un render" qui ouvre un Dialog picker (3 col) → choix template → ouvre `RunRenderDialog`. (f) Rapport UX agent reçu (gardé pour application séparée). |
+| **Phase 6** | mai 2026 | **Apple emojis dans le rendu ffmpeg final** (parité avec le canvas preview). Avant : `drawtext` n'a qu'une font, retombait sur tofu "NO GLYPH" pour tout codepoint emoji absent d'Inter/Montserrat. Maintenant : quand un layer texte contient un caractère `\p{Extended_Pictographic}`, on le pré-rend via **Pillow** dans un PNG transparent canvas-sized (1080×1920) puis on `overlay` ce PNG au lieu de drawtext. Les glyphes emoji viennent du pack **emoji-datasource-apple@15.1.2** (PNG 64×64) téléchargé **lazy au premier usage** depuis le CDN jsdelivr et caché dans `/data/apple_emojis/{unified}.png` — seulement les emojis effectivement utilisés sont fetchés. Texte plain (sans emoji) reste sur drawtext (rapide). Nouveaux modules : `backend/app/render/emoji_pack.py` (lazy CDN fetch + cache + fallback FE0F-stripping pour matcher le naming finicky du dataset), `backend/app/render/text_renderer.py` (tokenizer mots/spaces/emojis via `regex \X` graphème, line-fill avec wrap, layout center vertical dans la layer bbox, alignement gauche/centre/droite, support styles plain/highlight/stroke, letter-spacing rendu glyph-by-glyph). `pipeline.build_render_command` accepte `text_png_inputs: dict[layer_id → Path]` qui shortcut le drawtext en faveur d'un overlay@(0,0). `batch_runner.run_render` génère les PNGs avant le ffmpeg via `_render_text_pngs` avec dedupe par hash de contenu (`cache_key_for_layer`) — mêmes captions à travers un batch ne rendent qu'une fois. Deps ajoutées : `Pillow==11.0.0`, `regex==2024.11.6`. Pillow ships des wheels manylinux donc pas de package apt à ajouter au Dockerfile. Limitations connues : (1) bold/italic toggles toujours ignorés au render — le user doit picker une font déjà bold (pareil que drawtext, comportement préservé) ; (2) emoji 64px upscalé en LANCZOS si le user met un font_size_pct énorme — caption usuelles OK. |
 | **Phase 5** | mai 2026 | (a) **Wizard 3 étapes `/render/new`** : Step 1 Upload (drop multi-fichiers MP4/MOV avec progress bars), Step 2 Templates (3 modes — `all` = N×M reels, `random` = N reels distribués, `per_video` = 1 template manuel par vidéo) + filtre langue FR/US/All, Step 3 Confirm (job name, spoofing toggle, récap reels). Stepper visuel en haut. Construit `assignments[]` selon le mode et POST `/api/render/batch`. Pour les modes `all` et `random`, le même token vidéo remplit TOUS les placeholders du template (les templates avec ≥1 placeholder seulement sont éligibles). Lien dashboard "Lancer un render" → `/render/new` (l'ancien picker dialog est retiré). Sidebar : nouvelle entrée "Nouveau render" (icône `Rocket`). RunRenderDialog par-card sur `/templates` reste, c'est le flow single-template. (b) **Apple emojis** : `@emoji-mart/data` + `@emoji-mart/react` + `emoji-mart` ajoutés. `frontend/.npmrc` avec `legacy-peer-deps=true` (peer-dep emoji-mart liste seulement React 16/17/18 — fonctionne fine sur 19). `lib/apple-emoji.ts` : map natif → unified codepoints construite depuis le dataset emoji-mart au load + fallback codepoint manuel ; `parseTextWithEmojis(text)` segmente via `Intl.Segmenter` (granularity grapheme) + détection `\p{Extended_Pictographic}`. URLs CDN : `https://cdn.jsdelivr.net/npm/emoji-datasource-apple@15.1.2/img/apple/64/{unified}.png`. `emoji-picker.tsx` réécrit comme wrapper dynamic-imported autour du Picker emoji-mart (`set="apple"`, `theme="dark"`, `locale="fr"`). `text-layer.tsx` : composant interne `<RenderedText>` injecte des `<img>` 1em pour chaque grapheme emoji, applique sur les 3 styles (plain/highlight/stroke) — limite : émojis dans style `stroke` n'ont pas d'outline parce que `text-shadow` n'affecte pas les images. Note importante : seul le **canvas preview** affiche Apple ; le rendu ffmpeg backend continue d'utiliser NotoColorEmoji. |
 
 ---

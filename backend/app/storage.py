@@ -23,6 +23,11 @@ TEMP_DIR = DATA_DIR / "temp"
 # Final outputs of render jobs.
 RENDERS_DIR = DATA_DIR / "renders"
 
+# Lazy-cached Apple emoji PNG glyphs (one PNG per unified codepoints string).
+# Populated on demand by app.render.emoji_pack from the emoji-datasource-apple
+# CDN; only emojis the user actually puts into a caption ever get downloaded.
+APPLE_EMOJI_DIR = DATA_DIR / "apple_emojis"
+
 BUILTIN_FONTS_META: dict[str, str] = {
     "inter": "Inter",
     "montserrat": "Montserrat",
@@ -49,6 +54,7 @@ def ensure_dirs() -> None:
         TEMPLATES_DIR,
         TEMP_DIR,
         RENDERS_DIR,
+        APPLE_EMOJI_DIR,
         *ASSET_DIRS.values(),
     ):
         d.mkdir(parents=True, exist_ok=True)
