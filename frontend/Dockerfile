@@ -5,8 +5,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 # --- deps ---------------------------------------------------------------
 FROM base AS deps
-COPY package.json package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+COPY package.json package-lock.json* .npmrc* ./
+# --legacy-peer-deps : @emoji-mart/react@1.1.1 déclare encore react ^16/17/18
+# en peer-dep, alors qu'on est sur react 19 (compat OK en pratique).
+RUN if [ -f package-lock.json ]; then npm ci --legacy-peer-deps; else npm install --legacy-peer-deps; fi
 
 # --- dev (used by docker-compose) ---------------------------------------
 FROM base AS dev
