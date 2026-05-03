@@ -60,16 +60,16 @@ export type SourceSegment = z.infer<typeof SourceSegmentSchema>;
 const RawSegmentsSchema = z.array(z.unknown());
 
 export const AudioSourceConfigSchema = z.object({
-  volume: z.number().default(1.0),
-  enabled: z.boolean().default(true),
+  volume: z.number(),
+  enabled: z.boolean(),
 });
 export type AudioSourceConfig = z.infer<typeof AudioSourceConfigSchema>;
 
 export const AudioOverlayConfigSchema = z.object({
-  asset_id: z.number().nullable().default(null),
-  volume: z.number().default(1.0),
-  start_offset: z.number().default(0),
-  trim_in: z.number().default(0),
+  asset_id: z.number().nullable(),
+  volume: z.number(),
+  start_offset: z.number(),
+  trim_in: z.number(),
 });
 export type AudioOverlayConfig = z.infer<typeof AudioOverlayConfigSchema>;
 
@@ -80,14 +80,9 @@ export const TemplateSchema = z.object({
   duration_sec: z.number(),
   language: TemplateLanguageSchema,
   layers: RawLayersSchema,
-  source_segments: RawSegmentsSchema.default([]),
-  audio_source: AudioSourceConfigSchema.default({ volume: 1.0, enabled: true }),
-  audio_overlay: AudioOverlayConfigSchema.default({
-    asset_id: null,
-    volume: 1.0,
-    start_offset: 0,
-    trim_in: 0,
-  }),
+  source_segments: RawSegmentsSchema,
+  audio_source: AudioSourceConfigSchema,
+  audio_overlay: AudioOverlayConfigSchema,
   thumbnail_path: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
