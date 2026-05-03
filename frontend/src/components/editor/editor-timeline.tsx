@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { useEditorStore } from "@/store/editor";
 import {
@@ -12,15 +13,16 @@ import {
 } from "@/lib/editor-types";
 import { cn } from "@/lib/utils";
 import type { Layer } from "@/lib/api";
-import { ClipTrack, ClipTrackHeader } from "./clip-track";
+import { ClipTrack } from "./clip-track";
 import { OverlayAudioLane } from "./audio-tracks";
+import { TimelineActionBar } from "./timeline-action-bar";
 
-const TIMELINE_HEIGHT = 240;
-const HEADER_HEIGHT = 30;
-const RULER_HEIGHT = 24;
-const TRACK_HEIGHT = 28;
-const TRACK_GAP = 4;
-const LABEL_WIDTH = 120;
+const RULER_HEIGHT = 28;
+const CLIP_TRACK_HEIGHT = 70;
+const AUDIO_TRACK_HEIGHT = 50;
+const LAYER_TRACK_HEIGHT = 40;
+const TRACK_GAP = 6;
+const LABEL_WIDTH = 130;
 const MIN_PX_PER_SEC = 20;
 const MAX_PX_PER_SEC = 400;
 const MIN_LAYER_DURATION = 0.1;
@@ -36,6 +38,7 @@ export function EditorTimeline() {
 
   const duration = Math.max(1, totalDuration(clips));
   const [pxPerSec, setPxPerSec] = useState(60);
+  const [audioOpen, setAudioOpen] = useState(true);
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -53,9 +56,13 @@ export function EditorTimeline() {
 
   const tracksWidth = Math.max(duration * pxPerSec, 200);
   const layerTracks = [...layers].reverse();
-  // 2 fixed lanes: clips + audio overlay
+  const audioH = audioOpen ? AUDIO_TRACK_HEIGHT : 0;
   const totalTracksHeight =
-    (layerTracks.length + 2) * (TRACK_HEIGHT + TRACK_GAP);
+    CLIP_TRACK_HEIGHT +
+    TRACK_GAP +
+    audioH +
+    (audioOpen ? TRACK_GAP : 0) +
+    layerTracks.length * (LAYER_TRACK_HEIGHT + TRACK_GAP);
 
   const scrubFromX = useCallback(
     (clientX: number, container: HTMLDivElement) => {
@@ -83,11 +90,8 @@ export function EditorTimeline() {
   }
 
   return (
-    <div
-      className="flex shrink-0 flex-col border-t border-border bg-card"
-      style={{ height: TIMELINE_HEIGHT }}
-    >
-      <ClipTrackHeader />
+    <div className="flex shrink-0 flex-col border-t border-border bg-card" style={{ height: "55vh" }}>
+      <TimelineActionBar />
       <div className="flex flex-1 min-h-0">
         {/* Track labels (sticky left) */}
         <div
@@ -101,13 +105,27 @@ export function EditorTimeline() {
             <span>Pistes</span>
             <span className="font-mono">{Math.round(pxPerSec)} px/s</span>
           </div>
-          <TrackLabel label="Vidéo" />
-          <TrackLabel label="Audio" muted />
+          <TrackLabel label="Vidéo" height={CLIP_TRACK_HEIGHT + TRACK_GAP} />
+          <button
+            type="button"
+            onClick={() => setAudioOpen((v) => !v)}
+            className="flex items-center gap-1 truncate border-b border-border px-2 text-left transition hover:bg-accent/30"
+            style={{ height: (audioOpen ? AUDIO_TRACK_HEIGHT : 24) + TRACK_GAP }}
+            title={audioOpen ? "Replier la piste audio" : "Déplier la piste audio"}
+          >
+            {audioOpen ? (
+              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-3 w-3 text-muted-foreground" />
+            )}
+            <span className="truncate text-muted-foreground">Audio</span>
+          </button>
           {layerTracks.map((l) => (
             <TrackLabel
               key={l.id}
               label={`${LAYER_LABELS[l.type]} #${l.z_index + 1}`}
               color={LAYER_COLORS[l.type]}
+              height={LAYER_TRACK_HEIGHT + TRACK_GAP}
             />
           ))}
         </div>
@@ -115,15 +133,16 @@ export function EditorTimeline() {
         {/* Scrollable timeline body */}
         <div
           ref={scrollerRef}
-          className="relative flex-1 overflow-x-auto overflow-y-hidden"
+          className="relative flex-1 overflow-x-auto overflow-y-auto"
         >
           <div
             className="relative"
             style={{
               width: tracksWidth + 16,
-              height: RULER_HEIGHT + totalTracksHeight,
+              minHeight: RULER_HEIGHT + totalTracksHeight,
             }}
           >
+            {/* Ruler */}
             <div
               onMouseDown={onRulerDown}
               className="sticky top-0 z-10 cursor-pointer select-none border-b border-border bg-background"
@@ -137,16 +156,24 @@ export function EditorTimeline() {
                 <ClipTrack
                   pxPerSec={pxPerSec}
                   width={tracksWidth}
-                  height={TRACK_HEIGHT}
+                  height={CLIP_TRACK_HEIGHT}
                 />
               </div>
-              <div style={{ marginBottom: TRACK_GAP }}>
-                <OverlayAudioLane
-                  pxPerSec={pxPerSec}
-                  width={tracksWidth}
-                  height={TRACK_HEIGHT}
+              {audioOpen && (
+                <div style={{ marginBottom: TRACK_GAP }}>
+                  <OverlayAudioLane
+                    pxPerSec={pxPerSec}
+                    width={tracksWidth}
+                    height={AUDIO_TRACK_HEIGHT}
+                  />
+                </div>
+              )}
+              {!audioOpen && (
+                <div
+                  className="border-b border-border bg-background/20"
+                  style={{ width: tracksWidth, height: 24, marginBottom: TRACK_GAP }}
                 />
-              </div>
+              )}
               {layerTracks.map((layer) => (
                 <LayerLane
                   key={layer.id}
@@ -180,19 +207,16 @@ export function EditorTimeline() {
 function TrackLabel({
   label,
   color,
-  muted,
+  height,
 }: {
   label: string;
   color?: string;
-  muted?: boolean;
+  height: number;
 }) {
   return (
     <div
-      className={cn(
-        "flex items-center gap-2 truncate border-b border-border px-2",
-        muted && "text-muted-foreground",
-      )}
-      style={{ height: TRACK_HEIGHT + TRACK_GAP }}
+      className="flex items-center gap-2 truncate border-b border-border px-2 text-muted-foreground"
+      style={{ height }}
       title={label}
     >
       {color && (
@@ -209,7 +233,10 @@ function TrackLabel({
 function Ruler({ duration, pxPerSec }: { duration: number; pxPerSec: number }) {
   const ticks: { t: number; major: boolean }[] = [];
   for (let t = 0; t <= duration + 0.001; t += 0.5) {
-    ticks.push({ t: Math.round(t * 10) / 10, major: Math.abs(t - Math.round(t)) < 0.01 });
+    ticks.push({
+      t: Math.round(t * 10) / 10,
+      major: Math.abs(t - Math.round(t)) < 0.01,
+    });
   }
   return (
     <div className="relative h-full w-full">
@@ -295,17 +322,20 @@ function LayerLane({
   }
 
   const left = layer.start_time * pxPerSec;
-  const blockWidth = Math.max((layer.end_time - layer.start_time) * pxPerSec, 4);
+  const blockWidth = Math.max(
+    (layer.end_time - layer.start_time) * pxPerSec,
+    4,
+  );
 
   return (
     <div
       className="relative border-b border-border bg-background/20"
-      style={{ height: TRACK_HEIGHT, width, marginBottom: TRACK_GAP }}
+      style={{ height: LAYER_TRACK_HEIGHT, width, marginBottom: TRACK_GAP }}
     >
       <div
         onMouseDown={(e) => startInteraction(e, "move")}
         className={cn(
-          "absolute top-1 flex h-[calc(100%-8px)] cursor-grab items-center overflow-hidden rounded-sm border text-[10px] text-white active:cursor-grabbing",
+          "absolute top-1 flex h-[calc(100%-8px)] cursor-grab items-center overflow-hidden rounded-md border text-[11px] text-white active:cursor-grabbing",
           selected ? "border-foreground" : "border-transparent",
         )}
         style={{
@@ -316,14 +346,14 @@ function LayerLane({
       >
         <div
           onMouseDown={(e) => startInteraction(e, "resize-left")}
-          className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize bg-black/30"
+          className="absolute left-0 top-0 h-full w-2 cursor-ew-resize bg-black/30 hover:bg-black/50"
         />
-        <span className="pointer-events-none mx-2 truncate">
+        <span className="pointer-events-none mx-3 truncate">
           {LAYER_LABELS[layer.type]}
         </span>
         <div
           onMouseDown={(e) => startInteraction(e, "resize-right")}
-          className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize bg-black/30"
+          className="absolute right-0 top-0 h-full w-2 cursor-ew-resize bg-black/30 hover:bg-black/50"
         />
       </div>
     </div>

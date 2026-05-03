@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Film, Plus, Square } from "lucide-react";
+import { Film, Square } from "lucide-react";
 
 import { Templates } from "@/lib/api";
 import { useEditorStore } from "@/store/editor";
@@ -11,6 +11,8 @@ import {
 } from "@/lib/editor-types";
 import { cn } from "@/lib/utils";
 
+const ALLOWED_VIDEO_EXTS = [".mp4", ".mov"];
+
 type Props = {
   pxPerSec: number;
   width: number;
@@ -18,30 +20,120 @@ type Props = {
 };
 
 /**
- * The main video track. Clips sit side by side. Each clip is either a
- * fixed video (uploaded with the template) or a placeholder slot.
+ * Main video track. Each clip is a tall strip with the file's first frame
+ * as a stretched background (for fixed clips) or a yellow placeholder
+ * marker. Drag a clip body to reorder. Drag the edges to trim.
  *
- * Drag a clip to reorder. Click to select. The "+ Vidéo" / "+ Placeholder"
- * controls live in the timeline header (not here).
+ * Files dropped from the desktop directly onto the track are uploaded as
+ * fixed clips and appended to the timeline.
  */
 export function ClipTrack({ pxPerSec, width, height }: Props) {
+  const template = useEditorStore((s) => s.template);
   const clips = useEditorStore((s) => s.clips);
   const selectedClipId = useEditorStore((s) => s.selectedClipId);
   const setSelected = useEditorStore((s) => s.setSelectedClipId);
   const reorder = useEditorStore((s) => s.reorderClips);
+  const patchClip = useEditorStore((s) => s.patchClip);
+  const addFixed = useEditorStore((s) => s.addFixedClip);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dropHover, setDropHover] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const starts = clipStartTimes(clips);
 
+  function startTrim(
+    e: React.MouseEvent,
+    clipIdx: number,
+    edge: "left" | "right",
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    const clip = clips[clipIdx];
+    setSelected(clip.id);
+    const startX = e.clientX;
+
+    function onMove(ev: MouseEvent) {
+      const dt = (ev.clientX - startX) / pxPerSec;
+
+      if (clip.type === "placeholder") {
+        if (edge === "right") {
+          patchClip(clip.id, {
+            duration_sec: Math.max(0.1, clip.duration_sec + dt),
+          });
+        }
+        // left edge: noop for placeholder for now (no in-source time).
+        return;
+      }
+
+      // Fixed clip
+      if (edge === "right") {
+        const maxOut = clip.source_duration_sec ?? Infinity;
+        const initOut = clip.trim_out ?? clip.source_duration_sec ?? 0;
+        patchClip(clip.id, {
+          trim_out: Math.max(clip.trim_in + 0.1, Math.min(maxOut, initOut + dt)),
+        });
+      } else {
+        const initIn = clip.trim_in;
+        const maxIn = (clip.trim_out ?? clip.source_duration_sec ?? 0) - 0.1;
+        patchClip(clip.id, {
+          trim_in: Math.max(0, Math.min(maxIn, initIn + dt)),
+        });
+      }
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  async function onDropFiles(files: FileList | null) {
+    if (!template || !files || files.length === 0) return;
+    const valid: File[] = [];
+    for (const f of Array.from(files)) {
+      const lower = f.name.toLowerCase();
+      if (ALLOWED_VIDEO_EXTS.some((e) => lower.endsWith(e))) valid.push(f);
+    }
+    if (valid.length === 0) return;
+    setUploading(true);
+    try {
+      for (const f of valid) {
+        const res = await Templates.uploadClip(template.id, f);
+        addFixed(res.file_id, res.duration_sec, res.width, res.height);
+      }
+    } finally {
+      setUploading(false);
+    }
+  }
+
   return (
     <div
-      className="relative border-b border-border bg-background/40"
+      className={cn(
+        "relative border-b border-border bg-background/40 transition",
+        dropHover && "bg-primary/10 ring-2 ring-primary",
+      )}
       style={{ width, height }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        if (e.dataTransfer.types.includes("Files")) setDropHover(true);
+      }}
+      onDragLeave={() => setDropHover(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDropHover(false);
+        void onDropFiles(e.dataTransfer.files);
+      }}
     >
-      {clips.length === 0 && (
-        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">
-          Ajoute des clips depuis l&apos;en-tête de la timeline →
-        </span>
+      {clips.length === 0 && !uploading && (
+        <div className="absolute inset-0 flex items-center justify-center text-[11px] text-muted-foreground">
+          Drop tes vidéos ici, ou clique « + Vidéo / + Placeholder » au-dessus
+        </div>
+      )}
+      {uploading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-xs text-white">
+          Upload en cours…
+        </div>
       )}
 
       {clips.map((clip, i) => {
@@ -50,6 +142,12 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
         const w = Math.max(dur * pxPerSec, 8);
         const isPlaceholder = clip.type === "placeholder";
         const isSelected = clip.id === selectedClipId;
+
+        const thumbUrl =
+          template && clip.type === "fixed"
+            ? `/api/files/template_clip_thumb/${template.id}/${clip.file_id}`
+            : null;
+
         return (
           <div
             key={clip.id}
@@ -57,11 +155,14 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
             onDragStart={(e) => {
               setDragIdx(i);
               e.dataTransfer.effectAllowed = "move";
+              e.dataTransfer.setData("text/plain", String(i));
             }}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault();
-              if (dragIdx !== null && dragIdx !== i) reorder(dragIdx, i);
+              const fromStr = e.dataTransfer.getData("text/plain");
+              const from = Number(fromStr);
+              if (Number.isFinite(from) && from !== i) reorder(from, i);
               setDragIdx(null);
             }}
             onDragEnd={() => setDragIdx(null)}
@@ -70,27 +171,53 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
               setSelected(clip.id);
             }}
             className={cn(
-              "absolute top-1 flex h-[calc(100%-8px)] cursor-pointer items-center overflow-hidden rounded-sm border-2 text-[10px] text-white transition",
+              "absolute top-1 cursor-pointer overflow-hidden rounded-md border-2 transition",
               isPlaceholder
                 ? "border-dashed border-yellow-500/70 bg-yellow-700/30"
                 : "border-solid border-transparent bg-sky-700/80 hover:bg-sky-600/80",
-              isSelected && "border-foreground",
+              isSelected && "border-foreground shadow-lg",
             )}
-            style={{ left, width: w }}
+            style={{
+              left,
+              width: w,
+              height: "calc(100% - 8px)",
+              backgroundImage: thumbUrl ? `url(${thumbUrl})` : undefined,
+              backgroundSize: "auto 100%",
+              backgroundRepeat: "repeat-x",
+            }}
             title={
               isPlaceholder
                 ? `Placeholder · ${dur.toFixed(1)}s`
                 : `Clip · ${dur.toFixed(1)}s`
             }
           >
-            <div className="ml-2 flex items-center gap-1">
+            {/* Tinted overlay for readability */}
+            <div
+              className={cn(
+                "absolute inset-0",
+                isPlaceholder ? "bg-yellow-700/30" : "bg-black/30",
+              )}
+            />
+
+            {/* Trim handles */}
+            <div
+              onMouseDown={(e) => startTrim(e, i, "left")}
+              className="absolute left-0 top-0 z-10 h-full w-2 cursor-ew-resize bg-foreground/30 hover:bg-foreground/60"
+            />
+            <div
+              onMouseDown={(e) => startTrim(e, i, "right")}
+              className="absolute right-0 top-0 z-10 h-full w-2 cursor-ew-resize bg-foreground/30 hover:bg-foreground/60"
+            />
+
+            {/* Label */}
+            <div className="absolute left-3 top-1.5 z-[1] flex items-center gap-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
               {isPlaceholder ? (
                 <Square className="h-3 w-3" />
               ) : (
                 <Film className="h-3 w-3" />
               )}
               <span className="truncate">
-                {isPlaceholder ? "Placeholder" : "Vidéo"} #{i + 1}
+                {isPlaceholder ? "Placeholder" : `Clip ${i + 1}`}
                 {" · "}
                 {dur.toFixed(1)}s
               </span>
@@ -98,64 +225,6 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
           </div>
         );
       })}
-    </div>
-  );
-}
-
-/** Header with the two "+ Vidéo" / "+ Placeholder" buttons, shown above
- * the clip track. */
-export function ClipTrackHeader() {
-  const template = useEditorStore((s) => s.template);
-  const addFixed = useEditorStore((s) => s.addFixedClip);
-  const addPlaceholder = useEditorStore((s) => s.addPlaceholderClip);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
-
-  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    if (!template) return;
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setUploading(true);
-    try {
-      const res = await Templates.uploadClip(template.id, file);
-      addFixed(res.file_id, res.duration_sec, res.width, res.height);
-    } catch (err) {
-      console.error("clip upload failed", err);
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  return (
-    <div className="flex items-center gap-2 border-b border-border bg-card px-3 py-1.5">
-      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-        Vidéo
-      </span>
-      <button
-        type="button"
-        onClick={() => fileRef.current?.click()}
-        disabled={uploading}
-        className="flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] transition hover:bg-accent disabled:opacity-50"
-      >
-        <Plus className="h-3 w-3" />
-        {uploading ? "Upload…" : "Vidéo"}
-      </button>
-      <button
-        type="button"
-        onClick={() => addPlaceholder(3)}
-        className="flex items-center gap-1 rounded-md border border-dashed border-yellow-500/60 px-2 py-0.5 text-[11px] text-yellow-300 transition hover:bg-yellow-700/20"
-      >
-        <Plus className="h-3 w-3" />
-        Placeholder
-      </button>
-      <input
-        ref={fileRef}
-        type="file"
-        accept="video/mp4,video/quicktime,.mp4,.mov"
-        className="hidden"
-        onChange={onPickFile}
-      />
     </div>
   );
 }

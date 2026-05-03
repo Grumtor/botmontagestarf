@@ -48,6 +48,21 @@ def serve_template_clip(
     return FileResponse(p)
 
 
+@router.get("/template_clip_thumb/{template_id}/{file_id}")
+def serve_template_clip_thumb(
+    template_id: int, file_id: str, db: Session = Depends(get_db)
+) -> FileResponse:
+    """Serve the JPEG thumbnail extracted from a fixed clip at upload."""
+    from app.storage import template_clips_dir
+
+    if db.get(Template, template_id) is None:
+        raise HTTPException(404, "Template not found")
+    p = template_clips_dir(template_id) / f"{file_id}_thumb.jpg"
+    if not p.is_file():
+        raise HTTPException(404, "Thumbnail not found")
+    return FileResponse(p, media_type="image/jpeg")
+
+
 @router.get("/template_overlay/{template_id}/{file_id}")
 def serve_template_overlay(
     template_id: int, file_id: str, db: Session = Depends(get_db)

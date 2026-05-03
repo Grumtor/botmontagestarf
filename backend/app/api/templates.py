@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.db.models import Template, TemplateLanguage
-from app.media import MediaError, video_metadata
+from app.media import MediaError, make_video_thumb, video_metadata
 from app.storage import (
     template_clips_dir,
     template_dir,
@@ -272,6 +272,13 @@ async def upload_clip(
         duration, width, height = video_metadata(dest)
     except MediaError:
         duration, width, height = (None, None, None)
+
+    # Best-effort thumbnail (90×160 = 9:16 ratio @ thumbnail size).
+    thumb_path = template_clips_dir(template_id) / f"{file_id}_thumb.jpg"
+    try:
+        make_video_thumb(dest, thumb_path, width=90, height=160)
+    except MediaError:
+        pass
 
     return ClipUploadResponse(
         file_id=file_id,
