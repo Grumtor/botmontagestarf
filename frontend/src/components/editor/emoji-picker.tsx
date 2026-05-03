@@ -3,35 +3,20 @@
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { Smile } from "lucide-react";
+import data from "@emoji-mart/data";
 
-// emoji-mart's React picker is a heavy client-only component.
-// Dynamic import avoids SSR work and bloating the initial bundle.
-const Picker = dynamic(
-  async () => {
-    const [{ default: Picker }, dataMod] = await Promise.all([
-      import("@emoji-mart/react"),
-      import("@emoji-mart/data"),
-    ]);
-    const data = dataMod.default ?? dataMod;
-    return function PickerWrap(props: PickerProps) {
-      return <Picker data={data} {...props} />;
-    };
-  },
-  { ssr: false },
-);
+// emoji-mart enregistre un custom-element <em-emoji> au moment où le module
+// principal `emoji-mart` est chargé (transitive de @emoji-mart/react).
+// On charge le Picker en dynamic({ssr:false}) parce qu'il touche `window`,
+// mais SANS l'envelopper dans une factory — sinon le bundle perd le lien
+// avec le custom-element et tous les emojis s'affichent comme des "#".
+const Picker = dynamic(() => import("@emoji-mart/react"), { ssr: false });
 
-type PickerProps = {
-  set?: "apple" | "google" | "facebook" | "twitter" | "native";
-  theme?: "light" | "dark" | "auto";
-  locale?: string;
-  navPosition?: "top" | "bottom" | "none";
-  previewPosition?: "top" | "bottom" | "none";
-  skinTonePosition?: "preview" | "search" | "none";
-  emojiButtonSize?: number;
-  emojiSize?: number;
-  perLine?: number;
-  maxFrequentRows?: number;
-  onEmojiSelect?: (e: { native: string; id: string; unified: string }) => void;
+type EmojiSelectPayload = {
+  native: string;
+  id: string;
+  unified: string;
+  shortcodes?: string;
 };
 
 export function EmojiPickerButton({
@@ -66,6 +51,7 @@ export function EmojiPickerButton({
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1 shadow-xl">
           <Picker
+            data={data}
             set="apple"
             theme="dark"
             locale="fr"
@@ -75,7 +61,7 @@ export function EmojiPickerButton({
             emojiButtonSize={32}
             emojiSize={22}
             perLine={9}
-            onEmojiSelect={(e) => {
+            onEmojiSelect={(e: EmojiSelectPayload) => {
               onPick(e.native);
               setOpen(false);
             }}
