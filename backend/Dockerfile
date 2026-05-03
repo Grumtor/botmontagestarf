@@ -13,6 +13,7 @@ RUN apt-get update \
         atomicparsley \
         fonts-inter \
         fonts-montserrat \
+        fonts-noto-color-emoji \
         build-essential \
         libpq-dev \
         curl \

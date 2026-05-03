@@ -54,6 +54,44 @@ def ensure_dirs() -> None:
         d.mkdir(parents=True, exist_ok=True)
 
 
+PLACEHOLDER_PREVIEW_PATH = DATA_DIR / "_placeholder_preview.mp4"
+
+
+def ensure_placeholder_preview() -> Path:
+    """Generate a 30s black 1080x1920 mp4 once. Used as a synthetic source
+    when previewing a template whose placeholder slots haven't been filled
+    by the user yet."""
+    import subprocess
+
+    p = PLACEHOLDER_PREVIEW_PATH
+    if p.is_file():
+        return p
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-f", "lavfi",
+        "-i", "color=color=black:size=1080x1920:duration=30:rate=30",
+        "-f", "lavfi",
+        "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "64k",
+        "-shortest",
+        str(p),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, timeout=60)
+    except Exception as e:
+        log.warning("Failed to generate placeholder preview: %s", e)
+    return p
+
+
+def template_preview_path(template_id: int) -> Path:
+    return template_dir(template_id) / "preview.mp4"
+
+
 def template_dir(template_id: int) -> Path:
     return TEMPLATES_DIR / str(template_id)
 

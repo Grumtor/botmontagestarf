@@ -28,10 +28,16 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+import shutil
+
 from app.db import get_db
 from app.db.models import Template
 from app.render.batch_runner import gather_render_inputs, run_render
-from app.storage import TEMP_DIR
+from app.storage import (
+    PLACEHOLDER_PREVIEW_PATH,
+    TEMP_DIR,
+    template_preview_path,
+)
 
 log = logging.getLogger(__name__)
 
@@ -107,7 +113,12 @@ def render_preview(
     output_path = Path(tmp.name)
 
     try:
-        ctx = gather_render_inputs(db, template, fills)
+        ctx = gather_render_inputs(
+            db,
+            template,
+            fills,
+            fill_missing_placeholders_with=PLACEHOLDER_PREVIEW_PATH,
+        )
         run_render(
             template=template,
             ctx=ctx,
@@ -119,6 +130,15 @@ def render_preview(
     except Exception as e:
         output_path.unlink(missing_ok=True)
         raise HTTPException(500, f"Render failed: {e}")
+
+    # Persist a copy as the template's "preview" so the templates page card
+    # can play it without re-rendering.
+    try:
+        cached = template_preview_path(template.id)
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(output_path, cached)
+    except Exception as e:
+        log.warning("failed to cache template preview: %s", e)
 
     background_tasks.add_task(_safe_unlink, output_path)
     return FileResponse(path=output_path, media_type="video/mp4", filename="preview.mp4")

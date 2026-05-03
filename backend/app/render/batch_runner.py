@@ -22,6 +22,7 @@ from app.render.pipeline import (
     build_render_command,
 )
 from app.storage import (
+    PLACEHOLDER_PREVIEW_PATH,
     TEMP_DIR,
     builtin_font_path,
     template_clips_dir,
@@ -54,10 +55,17 @@ def _resolve_token(token: str) -> Optional[Path]:
 
 
 def gather_render_inputs(
-    db: Session, template: Template, fills: dict[str, str]
+    db: Session,
+    template: Template,
+    fills: dict[str, str],
+    *,
+    fill_missing_placeholders_with: Optional[Path] = None,
 ) -> RenderContext:
     """Resolve all file references for one render.
-    fills: { placeholder clip_id → upload token }"""
+    fills: { placeholder clip_id → upload token }
+    fill_missing_placeholders_with: if set, placeholders without a fill use
+      this video instead of raising. Used for preview rendering of a template
+      that hasn't been filled yet."""
     template_id = template.id
     clips_data = list(template.clips or [])
 
@@ -92,11 +100,19 @@ def gather_render_inputs(
         elif ctype == "placeholder":
             clip_id = clip.get("id")
             token = fills.get(clip_id)
-            if not token:
-                raise ValueError(f"No fill provided for placeholder clip {clip_id!r}")
-            path = _resolve_token(token)
-            if path is None:
-                raise ValueError(f"Upload token {token!r} not found in /data/temp")
+            path: Optional[Path] = None
+            if token:
+                path = _resolve_token(token)
+                if path is None:
+                    raise ValueError(f"Upload token {token!r} not found in /data/temp")
+            else:
+                if fill_missing_placeholders_with is None:
+                    raise ValueError(f"No fill provided for placeholder clip {clip_id!r}")
+                path = fill_missing_placeholders_with
+                if not path.is_file():
+                    raise ValueError(
+                        f"Placeholder fallback file missing: {path}"
+                    )
             target_dur = float(clip.get("duration_sec", 3.0))
             resolved_clips.append(
                 ClipInput(

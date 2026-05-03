@@ -90,7 +90,7 @@ export function EditorTimeline() {
   }
 
   return (
-    <div className="flex shrink-0 flex-col border-t border-border bg-card" style={{ height: "55vh" }}>
+    <div className="flex h-full min-h-0 flex-col bg-card">
       <TimelineActionBar />
       <div className="flex flex-1 min-h-0">
         {/* Track labels (sticky left) */}

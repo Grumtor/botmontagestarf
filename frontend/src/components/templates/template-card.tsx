@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Copy, Pencil, Trash2 } from "lucide-react";
+import { Copy, Pencil, Play, Trash2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { fr as frLocale } from "date-fns/locale";
 
@@ -19,6 +19,8 @@ type Props = {
 export function TemplateCard({ template, onDuplicate, onDelete }: Props) {
   const router = useRouter();
   const [thumbError, setThumbError] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [previewBroken, setPreviewBroken] = useState(false);
 
   const langLabel = template.language === "FR" ? "🇫🇷 FR" : "🇺🇸 US";
   const updated = formatDistanceToNow(new Date(template.updated_at), {
@@ -30,18 +32,28 @@ export function TemplateCard({ template, onDuplicate, onDelete }: Props) {
     e.stopPropagation();
   }
 
+  function openEditor() {
+    router.push(`/editor/${template.id}`);
+  }
+
+  function togglePreview(e: React.MouseEvent) {
+    e.stopPropagation();
+    setPreviewBroken(false);
+    setPlaying((v) => !v);
+  }
+
   return (
     <div
       role="button"
       tabIndex={0}
-      onClick={() => router.push(`/editor/${template.id}`)}
+      onClick={openEditor}
       onKeyDown={(e) => {
-        if (e.key === "Enter") router.push(`/editor/${template.id}`);
+        if (e.key === "Enter") openEditor();
       }}
       className="group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border border-border bg-card transition hover:border-ring"
     >
       <div className="relative aspect-[9/16] w-full bg-black">
-        {!thumbError && (
+        {!playing && !thumbError && (
           <img
             src={`/api/files/template_thumb/${template.id}`}
             alt={template.name}
@@ -50,15 +62,49 @@ export function TemplateCard({ template, onDuplicate, onDelete }: Props) {
           />
         )}
 
+        {playing && !previewBroken && (
+          <video
+            src={`/api/files/template_preview/${template.id}`}
+            autoPlay
+            loop
+            muted
+            playsInline
+            className="absolute inset-0 h-full w-full object-cover"
+            onError={() => setPreviewBroken(true)}
+          />
+        )}
+
+        {playing && previewBroken && (
+          <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-[11px] text-muted-foreground">
+            Aucun aperçu — ouvre le template et clique « Aperçu rendu » pour en générer un.
+          </div>
+        )}
+
+        {/* Play button overlay (always visible on hover) */}
+        {!playing && (
+          <button
+            type="button"
+            aria-label="Lire l'aperçu"
+            title="Lire l'aperçu"
+            onClick={togglePreview}
+            className="absolute inset-0 z-[1] flex items-center justify-center bg-black/0 opacity-0 transition group-hover:bg-black/30 group-hover:opacity-100"
+          >
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/90 text-primary-foreground shadow-lg">
+              <Play className="ml-0.5 h-5 w-5" />
+            </span>
+          </button>
+        )}
+
+        {/* Edit/Duplicate/Delete row (top-right on hover) */}
         <div
-          className="pointer-events-none absolute right-2 top-2 flex gap-1 opacity-0 transition group-hover:pointer-events-auto group-hover:opacity-100"
+          className="pointer-events-none absolute right-2 top-2 z-[2] flex gap-1 opacity-0 transition group-hover:pointer-events-auto group-hover:opacity-100"
           onClick={stop}
         >
           <IconBtn
             label="Edit"
             onClick={(e) => {
               stop(e);
-              router.push(`/editor/${template.id}`);
+              openEditor();
             }}
           >
             <Pencil className="h-3.5 w-3.5" />

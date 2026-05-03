@@ -16,7 +16,7 @@ from app.api.templates import router as templates_router
 from app.auth.routes import router as auth_router
 from app.config import settings
 from app.middleware import AuthMiddleware
-from app.storage import ensure_dirs, install_builtin_fonts
+from app.storage import ensure_dirs, ensure_placeholder_preview, install_builtin_fonts
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +41,11 @@ async def lifespan(app: FastAPI):
         install_builtin_fonts()
     except Exception as e:
         log.exception("install_builtin_fonts failed: %s", e)
+
+    try:
+        ensure_placeholder_preview()
+    except Exception as e:
+        log.exception("ensure_placeholder_preview failed: %s", e)
 
     # Migrations are no longer run at boot — they hang on Railway when
     # DATABASE_URL is misconfigured. Run them manually after deploy via

@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import { fontFamily } from "@/lib/editor-types";
 import { parseTextData, type FontId, type Layer, type TextStyle } from "@/lib/api";
 import { useEditorStore } from "@/store/editor";
 import { cn } from "@/lib/utils";
+import { EmojiPickerButton } from "./emoji-picker";
 
 type Props = { layer: Layer };
 
@@ -68,11 +70,37 @@ function StyleTab({
   const data = parseTextData(layer.data);
   const fonts = useEditorStore((s) => s.fonts);
   const patchLayer = useEditorStore((s) => s.patchLayer);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  function insertEmojiAtCursor(emoji: string) {
+    const ta = textareaRef.current;
+    if (!ta) {
+      onPatchData({ text: data.text + emoji });
+      return;
+    }
+    const start = ta.selectionStart ?? data.text.length;
+    const end = ta.selectionEnd ?? data.text.length;
+    const next = data.text.slice(0, start) + emoji + data.text.slice(end);
+    onPatchData({ text: next });
+    requestAnimationFrame(() => {
+      ta.focus();
+      const pos = start + emoji.length;
+      ta.setSelectionRange(pos, pos);
+    });
+  }
 
   return (
     <div className="space-y-4 pt-2">
-      <Field label="Texte">
+      <Field
+        label={
+          <span className="flex items-center justify-between">
+            <span>Texte</span>
+            <EmojiPickerButton onPick={insertEmojiAtCursor} />
+          </span>
+        }
+      >
         <textarea
+          ref={textareaRef}
           value={data.text}
           onChange={(e) => onPatchData({ text: e.target.value })}
           rows={3}
@@ -285,7 +313,7 @@ function Field({
   label,
   children,
 }: {
-  label: string;
+  label: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (

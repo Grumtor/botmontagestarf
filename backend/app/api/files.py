@@ -87,6 +87,21 @@ def serve_template_thumb(
     return FileResponse(p)
 
 
+@router.get("/template_preview/{template_id}")
+def serve_template_preview(
+    template_id: int, db: Session = Depends(get_db)
+) -> FileResponse:
+    """Cached preview MP4 of a template (last "Aperçu rendu" output)."""
+    from app.storage import template_preview_path
+
+    if db.get(Template, template_id) is None:
+        raise HTTPException(404, "Template not found")
+    p = template_preview_path(template_id)
+    if not p.is_file():
+        raise HTTPException(404, "No preview yet")
+    return FileResponse(p, media_type="video/mp4")
+
+
 @router.get("/render/{job_id}")
 def serve_render_zip(job_id: int, db: Session = Depends(get_db)) -> FileResponse:
     rec = db.get(RenderJob, job_id)

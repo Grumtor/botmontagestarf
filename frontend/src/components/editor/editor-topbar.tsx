@@ -33,15 +33,6 @@ export function EditorTopbar() {
 
   async function onRenderPreview() {
     if (!template) return;
-    const placeholderClips = clips.filter((c) => c.type === "placeholder");
-    if (placeholderClips.length > 0) {
-      setRenderError(
-        `Le template a ${placeholderClips.length} placeholder(s). ` +
-          "L'aperçu du template est plus utile une fois le batch lancé.",
-      );
-      setRenderOpen(true);
-      return;
-    }
     if (clips.length === 0) {
       setRenderError("Le template est vide. Ajoute au moins un clip.");
       setRenderOpen(true);
