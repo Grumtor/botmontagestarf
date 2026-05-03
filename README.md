@@ -1,67 +1,40 @@
 # bot-montage
 
-Outil perso pour générer des reels Instagram en batch.
+Outil perso pour générer des reels Instagram en batch à partir de templates de montage personnels avec des "trous" (placeholders) qu'on remplit avec ses propres vidéos au moment du rendu.
+
+## Concept
+
+1. Construis un **template** dans l'éditeur style Instagram Edits/CapCut : timeline de clips (vidéos fixes ou images fixes uploadées avec le template), placeholders (trous pour les vidéos qu'on insèrera plus tard), texte/GIFs/emojis en overlay, musique optionnelle.
+2. Lance un **batch render** : drop N vidéos pour chaque placeholder → le bot produit N reels (chacun = template avec une vidéo dans chaque trou).
+3. Optionnel : **spoofing métadonnées iPhone** (QuickTime branding + GPS USA + date random + iPhone 17 Pro etc.) pour que les vidéos passent pour des captures iPhone.
 
 ## Stack
 
-- **Frontend** — Next.js 15 (App Router) + TypeScript + Tailwind + shadcn/ui + Zustand
-- **Backend** — Python 3.11 + FastAPI + SQLAlchemy 2 + Alembic
-- **DB** — PostgreSQL 16
-- **Queue** — Celery + Redis 7
-- **Media tools** (dans le container backend) — ffmpeg, exiftool, AtomicParsley
-- **Déploiement** — Railway (Docker)
+- **Frontend** : Next.js 15 (App Router) + TypeScript + Tailwind v3 + shadcn/ui + Zustand + zod
+- **Backend** : Python 3.11 + FastAPI + SQLAlchemy 2 + Alembic + Pydantic v2
+- **DB** : PostgreSQL 16
+- **Queue** : Celery + Redis
+- **Media** : ffmpeg + ffprobe + exiftool + AtomicParsley + mutagen + Inter/Montserrat/NotoColorEmoji
+- **Auth** : JWT cookie HttpOnly + bcrypt
+- **Hébergement** : Railway (Postgres + Redis managés, app combined backend+worker, frontend séparé)
 
-## Arborescence
+## Pages
 
-```
-.
-├── backend/                  FastAPI + Celery
-│   ├── app/
-│   │   ├── auth/             /api/auth/login + logout, JWT, bcrypt
-│   │   ├── models/           SQLAlchemy models
-│   │   ├── tasks/            Celery tasks
-│   │   ├── celery_app.py
-│   │   ├── config.py
-│   │   ├── database.py
-│   │   └── main.py
-│   ├── alembic/              Migrations
-│   ├── alembic.ini
-│   ├── Dockerfile            Installe ffmpeg / exiftool / atomicparsley
-│   └── requirements.txt
-├── frontend/                 Next.js 15
-│   ├── src/
-│   │   ├── app/
-│   │   │   ├── (app)/        Layout authentifié (sidebar + header)
-│   │   │   │   ├── page.tsx              Dashboard
-│   │   │   │   ├── templates/page.tsx
-│   │   │   │   ├── render/new/page.tsx
-│   │   │   │   └── jobs/page.tsx
-│   │   │   ├── login/page.tsx
-│   │   │   ├── layout.tsx
-│   │   │   └── globals.css
-│   │   ├── components/
-│   │   │   ├── app/          Sidebar, Header
-│   │   │   └── ui/           shadcn/ui
-│   │   ├── lib/utils.ts
-│   │   ├── store/            Zustand
-│   │   └── middleware.ts     Auth gate
-│   ├── Dockerfile            Multi-stage : dev + prod (Railway)
-│   ├── package.json
-│   └── ...
-├── docker-compose.yml        Stack dev complète
-├── railway.toml              Config Railway
-└── .env.example
-```
+- `/` — Dashboard (stats + 8 derniers jobs + bouton "Lancer un render")
+- `/templates` — grille des templates avec play overlay → preview vidéo, bouton "Lance un render" par card
+- `/editor/{id}` — éditeur clip-based plein écran (timeline + canvas + inspector)
+- `/jobs` — liste des render jobs avec polling 2s
+- `/jobs/{id}` — détail + downloads par fichier + ZIP global
 
 ## Dev local
 
-### 1. Configurer l'env
+### 1. Variables
 
 ```bash
 cp .env.example .env
 # Édite .env :
-#   BACKEND_PASSWORD=<ton mot de passe de login>
-#   JWT_SECRET=<32+ char random>
+#   BACKEND_PASSWORD=<mot de passe de login>
+#   JWT_SECRET=<chaîne aléatoire 32+ chars>
 ```
 
 ### 2. Lancer la stack
@@ -70,25 +43,22 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Services lancés :
-- Frontend Next.js → http://localhost:3000
-- Backend FastAPI → http://localhost:8000 (docs : `/docs`)
-- Postgres → `localhost:5432` (user/pw/db = `botmontage`)
-- Redis → `localhost:6379`
-- Celery worker
+- Frontend : http://localhost:3000
+- Backend : http://localhost:8000 (docs : `/docs`)
+- Postgres : `localhost:5432` (user/pw/db = `botmontage`)
+- Redis : `localhost:6379`
 
-À la première visite, `localhost:3000` redirige vers `/login`.
+### 3. Migrations
 
-### 3. Migrations Alembic
-
-À l'intérieur du container backend :
+Au premier boot, le backend ne lance pas les migrations automatiquement (elles peuvent hang sur Railway si DATABASE_URL est mal config). Lance-les manuellement :
 
 ```bash
-docker compose exec backend alembic revision --autogenerate -m "init"
 docker compose exec backend alembic upgrade head
 ```
 
-### 4. Vérifier les outils média (critère d'acceptation #6)
+Ou en prod via l'endpoint `/api/_admin/migrate?secret=<JWT_SECRET>`.
+
+### 4. Vérifier les outils média
 
 ```bash
 docker compose exec backend ffmpeg -version
@@ -96,71 +66,39 @@ docker compose exec backend exiftool -ver
 docker compose exec backend AtomicParsley --help
 ```
 
-### 5. Logs
-
-```bash
-docker compose logs -f backend
-docker compose logs -f worker
-docker compose logs -f frontend
-```
-
 ## Déploiement Railway
 
-Railway déploie chaque service depuis un sous-répertoire du repo via Dockerfile.
+Voir `CLAUDE_CONTEXT.md` section 10 pour le détail des pièges Railway. En résumé :
 
-### Plan
+1. **Postgres + Redis** managés (plugins).
+2. **Service `app`** : un seul container qui combine backend + worker Celery (Railway ne permet pas de partager un volume entre 2 services).
+   - Root Directory : `/backend`
+   - Start Command : `sh -c "celery -A app.celery_app.celery_app worker --loglevel=info --concurrency=2 & uvicorn app.main:app --host 0.0.0.0 --port $PORT"`
+   - Volume monté à `/data` (5 GB).
+   - Variables : `DATABASE_URL`, `REDIS_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND` (toutes via `${{ Postgres.DATABASE_URL }}` ou `${{ Redis.REDIS_URL }}`), `BACKEND_PASSWORD`, `JWT_SECRET`, `JWT_EXPIRE_HOURS=168`, `CORS_ORIGINS=<frontend URL>`, `PORT=8000`.
+3. **Service `frontend`** : Root Directory `/frontend`. Variables : `BACKEND_URL=https://<backend>.up.railway.app`, `JWT_SECRET=<MÊME que backend>`, `NEXT_TELEMETRY_DISABLED=1`.
+4. Une fois déployé : run la migration via la console F12 du browser :
+   ```js
+   fetch('/api/_admin/migrate?secret=TON_JWT_SECRET', { method: 'POST' }).then(r => r.json()).then(console.log)
+   ```
 
-1. **Plugins managés** — Postgres + Redis (depuis "Add Service" → Database).
-2. **Service `backend`** — code-based service, Root Directory = `/backend`.
-3. **Service `worker`** — code-based service, Root Directory = `/backend`. Override Start Command : `celery -A app.celery_app.celery_app worker --loglevel=info`.
-4. **Service `frontend`** — code-based service, Root Directory = `/frontend`.
-
-### Variables (Railway → Variables onglet de chaque service)
-
-**backend & worker :**
-
-```
-DATABASE_URL           = ${{ Postgres.DATABASE_URL }}
-REDIS_URL              = ${{ Redis.REDIS_URL }}
-CELERY_BROKER_URL      = ${{ Redis.REDIS_URL }}
-CELERY_RESULT_BACKEND  = ${{ Redis.REDIS_URL }}
-BACKEND_PASSWORD       = <ton mot de passe>
-JWT_SECRET             = <random 64 char, IDENTIQUE entre backend/worker/frontend>
-JWT_EXPIRE_HOURS       = 168
-CORS_ORIGINS           = https://<ton frontend>.up.railway.app
-```
-
-**frontend :**
-
-```
-BACKEND_URL              = ${{ backend.RAILWAY_PRIVATE_DOMAIN }}:8000   # ou l'URL publique
-JWT_SECRET               = <même valeur que backend>
-NEXT_TELEMETRY_DISABLED  = 1
-```
-
-> Note : Railway expose un domaine privé interne entre services (`*.railway.internal`). Préfère cette route pour `BACKEND_URL` afin de garder le trafic interne.
-
-### Migrations sur Railway
-
-Une fois le backend déployé, exécute les migrations :
-
-```bash
-railway run --service backend alembic upgrade head
-```
-
-## Login
+## Auth
 
 - Page `/login` : un seul champ password.
 - `POST /api/auth/login` compare avec `BACKEND_PASSWORD` (hashé bcrypt en mémoire au boot).
-- Cookie `auth_token` HttpOnly + JWT `{ authenticated: true }`.
-- Le middleware Next.js vérifie le JWT (via `jose` + `JWT_SECRET`) sur toutes les routes sauf `/login` et `/api/*`.
-- `POST /api/auth/logout` supprime le cookie.
+- Cookie `auth_token` HttpOnly + JWT.
+- Middleware Next.js vérifie le JWT (via `jose` + `JWT_SECRET`) sur toutes les routes sauf `/login` et `/api/*`.
 
-## Critères d'acceptation
+## Modèle de données
 
-1. ✅ `docker compose up` lance toute la stack
-2. ✅ `localhost:3000` redirige vers `/login` si non authentifié
-3. ✅ Login → layout sidebar + header + Dashboard placeholder
-4. ✅ Navigation entre les 4 pages, item actif visuellement marqué
-5. ✅ Logout supprime le cookie et renvoie vers `/login`
-6. ✅ `ffmpeg -version`, `exiftool -ver`, `AtomicParsley --help` répondent dans le container backend
+Voir `CLAUDE_CONTEXT.md` section 5 pour le détail. En résumé :
+
+- **Template** : `clips: Clip[]` + `layers: Layer[]` + `audio_overlay`
+  - **Clip** ∈ `fixed` (vidéo uploadée), `image` (image fixe uploadée, durée custom), `placeholder` (trou rempli au render)
+  - **Layer** ∈ `text` / `image` overlay / `gif` / `emoji` (overlays au-dessus de la vidéo)
+- **Asset** : table conservée mais utilisée uniquement pour les fonts persistantes
+- **RenderJob** : `assignments: [{template_id, fills: {clip_id: token}}, ...]` + `metadata_profile`
+
+## Contexte technique complet
+
+Voir `CLAUDE_CONTEXT.md` — document interne pour reprendre le projet sans contexte préalable.

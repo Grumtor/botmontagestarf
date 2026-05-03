@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import {
   Film,
   ImageIcon,
+  ImagePlus,
   Music,
   Smile,
   Sparkles,
@@ -14,12 +15,17 @@ import {
 import { Templates, type LayerType } from "@/lib/api";
 import { useEditorStore } from "@/store/editor";
 
-/** Big-button row above the timeline tracks: + Vidéo, + Placeholder, + Texte,
- * + Image, + GIF, + Emoji, + Audio overlay. Each button either uploads a file
- * or just creates the layer/clip directly. */
+/** Action bar above the timeline. Two groups:
+ *   - Main track: + Vidéo, + Image, + Placeholder
+ *   - Overlays:   + Texte, + GIF, + Emoji, + Audio
+ *
+ * "+ Image" places an image as a CLIP on the main video track (replaces the
+ * video for its duration). "+ GIF" / "+ Emoji" stay as floating overlays.
+ */
 export function TimelineActionBar() {
   const template = useEditorStore((s) => s.template);
   const addFixed = useEditorStore((s) => s.addFixedClip);
+  const addImageClip = useEditorStore((s) => s.addImageClip);
   const addPlaceholder = useEditorStore((s) => s.addPlaceholderClip);
   const addLayer = useEditorStore((s) => s.addLayer);
   const patchLayerData = useEditorStore((s) => s.patchLayerData);
@@ -27,6 +33,7 @@ export function TimelineActionBar() {
   const setAudioSelected = useEditorStore((s) => s.setAudioSelected);
 
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const imageClipInputRef = useRef<HTMLInputElement>(null);
   const overlayInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const [pendingType, setPendingType] = useState<LayerType | null>(null);
@@ -40,7 +47,27 @@ export function TimelineActionBar() {
     setUploading(true);
     try {
       const res = await Templates.uploadClip(template.id, file);
-      addFixed(res.file_id, res.duration_sec, res.width, res.height);
+      // Backend returns kind=video|image based on extension. If for some
+      // reason an image landed via the Vidéo button, dispatch correctly.
+      if (res.kind === "image") {
+        addImageClip(res.file_id, res.width, res.height);
+      } else {
+        addFixed(res.file_id, res.duration_sec, res.width, res.height);
+      }
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function onImageClipFile(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!template) return;
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const res = await Templates.uploadClip(template.id, file);
+      addImageClip(res.file_id, res.width, res.height);
     } finally {
       setUploading(false);
     }
@@ -98,6 +125,12 @@ export function TimelineActionBar() {
         disabled={uploading || !template}
       />
       <ActionButton
+        icon={ImagePlus}
+        label="Image"
+        onClick={() => imageClipInputRef.current?.click()}
+        disabled={uploading || !template}
+      />
+      <ActionButton
         icon={Square}
         label="Placeholder"
         onClick={() => addPlaceholder(3)}
@@ -110,12 +143,6 @@ export function TimelineActionBar() {
         label="Texte"
         onClick={() => addLayer("text")}
         disabled={!template}
-      />
-      <ActionButton
-        icon={ImageIcon}
-        label="Image"
-        onClick={() => pickOverlayLayer("image")}
-        disabled={uploading || !template}
       />
       <ActionButton
         icon={Sparkles}
@@ -149,6 +176,13 @@ export function TimelineActionBar() {
         accept="video/mp4,video/quicktime,.mp4,.mov"
         className="hidden"
         onChange={onVideoFile}
+      />
+      <input
+        ref={imageClipInputRef}
+        type="file"
+        accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+        className="hidden"
+        onChange={onImageClipFile}
       />
       <input
         ref={overlayInputRef}

@@ -44,7 +44,9 @@ router = APIRouter(prefix="/api/templates", tags=["templates"])
 
 UPLOAD_MAX_BYTES = 500 * 1024 * 1024
 CHUNK = 1024 * 1024
-ALLOWED_CLIP_EXTS = {".mp4", ".mov"}
+ALLOWED_VIDEO_CLIP_EXTS = {".mp4", ".mov"}
+ALLOWED_IMAGE_CLIP_EXTS = {".png", ".jpg", ".jpeg"}
+ALLOWED_CLIP_EXTS = ALLOWED_VIDEO_CLIP_EXTS | ALLOWED_IMAGE_CLIP_EXTS
 ALLOWED_OVERLAY_EXTS = {
     ".png", ".jpg", ".jpeg", ".gif",
     ".mp3", ".wav", ".m4a",
@@ -89,6 +91,7 @@ class TemplateRead(BaseModel):
 
 class ClipUploadResponse(BaseModel):
     file_id: str
+    kind: str  # "video" | "image"
     duration_sec: Optional[float]
     width: Optional[int]
     height: Optional[int]
@@ -254,12 +257,17 @@ async def upload_clip(
     if db.get(Template, template_id) is None:
         raise HTTPException(404, "Template not found")
 
-    original = file.filename or "clip.mp4"
+    original = file.filename or "clip"
     ext = Path(original).suffix.lower()
     if ext not in ALLOWED_CLIP_EXTS:
         raise HTTPException(
-            400, f"Unsupported extension {ext!r}; allowed: mp4, mov"
+            400,
+            f"Unsupported extension {ext!r}; allowed: "
+            f"{', '.join(sorted(ALLOWED_CLIP_EXTS))}",
         )
+
+    is_image = ext in ALLOWED_IMAGE_CLIP_EXTS
+    kind = "image" if is_image else "video"
 
     file_id = uuid.uuid4().hex
     dest = template_clips_dir(template_id) / f"{file_id}{ext}"
@@ -268,20 +276,48 @@ async def upload_clip(
     duration: Optional[float]
     width: Optional[int]
     height: Optional[int]
-    try:
-        duration, width, height = video_metadata(dest)
-    except MediaError:
-        duration, width, height = (None, None, None)
 
-    # Best-effort thumbnail (90×160 = 9:16 ratio @ thumbnail size).
-    thumb_path = template_clips_dir(template_id) / f"{file_id}_thumb.jpg"
-    try:
-        make_video_thumb(dest, thumb_path, width=90, height=160)
-    except MediaError:
-        pass
+    if is_image:
+        # For static images we don't have a video duration. Frontend will
+        # set its own duration_sec on the placeholder-style image clip.
+        # Use ffprobe to get dimensions.
+        try:
+            info = video_metadata(dest)
+            _, width, height = info
+        except MediaError:
+            width, height = (None, None)
+        duration = None
+        # For thumbnail of an image clip: just copy/scale the image as JPEG.
+        thumb_path = template_clips_dir(template_id) / f"{file_id}_thumb.jpg"
+        try:
+            import subprocess
+            subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-i", str(dest),
+                    "-vf", "scale=90:160:force_original_aspect_ratio=decrease,pad=90:160:(ow-iw)/2:(oh-ih)/2:black",
+                    "-frames:v", "1",
+                    "-q:v", "3",
+                    str(thumb_path),
+                ],
+                capture_output=True, check=True, timeout=15,
+            )
+        except Exception:
+            pass
+    else:
+        try:
+            duration, width, height = video_metadata(dest)
+        except MediaError:
+            duration, width, height = (None, None, None)
+        thumb_path = template_clips_dir(template_id) / f"{file_id}_thumb.jpg"
+        try:
+            make_video_thumb(dest, thumb_path, width=90, height=160)
+        except MediaError:
+            pass
 
     return ClipUploadResponse(
         file_id=file_id,
+        kind=kind,
         duration_sec=duration,
         width=width,
         height=height,

@@ -56,6 +56,10 @@ class ClipInput:
     # pad with last frame (and silence) if shorter. Used by placeholders
     # whose duration is fixed by the template, regardless of the source.
     target_duration: Optional[float] = None
+    # If True, the source is a still image — ffmpeg input uses
+    # `-loop 1 -framerate FPS -t target_duration` so the image becomes a
+    # video of the right length. target_duration must be set.
+    is_image: bool = False
 
 
 @dataclass
@@ -164,7 +168,16 @@ def build_render_command(
 
     # 1. Inputs for each clip on the main track
     for clip in clips:
-        inputs.extend(["-i", str(clip.path)])
+        if clip.is_image:
+            dur = clip.target_duration or 3.0
+            inputs.extend([
+                "-loop", "1",
+                "-framerate", str(fps),
+                "-t", f"{dur:.3f}",
+                "-i", str(clip.path),
+            ])
+        else:
+            inputs.extend(["-i", str(clip.path)])
         clip_input_indices.append(next_idx)
         next_idx += 1
 
@@ -219,7 +232,8 @@ def build_render_command(
         seg_v_labels.append(f"[{v_label}]")
 
         # Audio sub-chain (always emit something so concat sees v=1:a=1).
-        if clip.audio_enabled and clip.audio_volume > 0:
+        # Image clips have no audio source → always emit silence.
+        if clip.audio_enabled and clip.audio_volume > 0 and not clip.is_image:
             a_chain = f"[{in_idx}:a]"
             if clip.trim_out is not None:
                 a_chain += f"atrim=start={clip.trim_in}:end={clip.trim_out},"

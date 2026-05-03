@@ -8,6 +8,8 @@ import {
   LAYER_COLORS,
   LAYER_LABELS,
   clamp,
+  clipDuration,
+  clipStartTimes,
   formatTime,
   totalDuration,
 } from "@/lib/editor-types";
@@ -56,6 +58,14 @@ export function EditorTimeline() {
 
   const tracksWidth = Math.max(duration * pxPerSec, 200);
   const layerTracks = [...layers].reverse();
+
+  // Snap points = each clip's start + each clip's end + 0 + total duration + playhead.
+  const starts = clipStartTimes(clips);
+  const snapPoints: number[] = [0, duration, currentTime];
+  starts.forEach((s, i) => {
+    snapPoints.push(s);
+    snapPoints.push(s + clipDuration(clips[i]));
+  });
   const audioH = audioOpen ? AUDIO_TRACK_HEIGHT : 0;
   const totalTracksHeight =
     CLIP_TRACK_HEIGHT +
@@ -184,6 +194,7 @@ export function EditorTimeline() {
                   selected={layer.id === selectedLayerId}
                   onSelect={() => setSelected(layer.id)}
                   onPatch={(p) => patchLayer(layer.id, p)}
+                  snapPoints={snapPoints}
                 />
               ))}
             </div>
@@ -263,6 +274,19 @@ function Ruler({ duration, pxPerSec }: { duration: number; pxPerSec: number }) {
   );
 }
 
+function snapTo(value: number, points: number[], thresholdSec: number): number {
+  let best = value;
+  let bestDist = thresholdSec;
+  for (const p of points) {
+    const d = Math.abs(value - p);
+    if (d < bestDist) {
+      bestDist = d;
+      best = p;
+    }
+  }
+  return best;
+}
+
 function LayerLane({
   layer,
   duration,
@@ -271,6 +295,7 @@ function LayerLane({
   selected,
   onSelect,
   onPatch,
+  snapPoints,
 }: {
   layer: Layer;
   duration: number;
@@ -279,7 +304,11 @@ function LayerLane({
   selected: boolean;
   onSelect: () => void;
   onPatch: (patch: Partial<Layer>) => void;
+  snapPoints: number[];
 }) {
+  // Snap threshold: ~10px in time. Bigger px/s = smaller threshold in seconds.
+  const snapThreshold = 10 / Math.max(1, pxPerSec);
+
   function startInteraction(
     e: React.MouseEvent,
     mode: "move" | "resize-left" | "resize-right",
@@ -295,21 +324,33 @@ function LayerLane({
       const dt = (ev.clientX - startX) / pxPerSec;
       if (mode === "move") {
         const len = startEnd - startStart;
-        const newStart = clamp(startStart + dt, 0, Math.max(0, duration - len));
+        let newStart = clamp(startStart + dt, 0, Math.max(0, duration - len));
+        // Snap either edge to the nearest clip boundary.
+        const snappedStart = snapTo(newStart, snapPoints, snapThreshold);
+        const snappedEnd = snapTo(newStart + len, snapPoints, snapThreshold);
+        if (snappedStart !== newStart) {
+          newStart = clamp(snappedStart, 0, Math.max(0, duration - len));
+        } else if (snappedEnd !== newStart + len) {
+          newStart = clamp(snappedEnd - len, 0, Math.max(0, duration - len));
+        }
         onPatch({ start_time: newStart, end_time: newStart + len });
       } else if (mode === "resize-left") {
-        const newStart = clamp(
+        let newStart = clamp(
           startStart + dt,
           0,
           startEnd - MIN_LAYER_DURATION,
         );
+        newStart = snapTo(newStart, snapPoints, snapThreshold);
+        newStart = clamp(newStart, 0, startEnd - MIN_LAYER_DURATION);
         onPatch({ start_time: newStart });
       } else if (mode === "resize-right") {
-        const newEnd = clamp(
+        let newEnd = clamp(
           startEnd + dt,
           startStart + MIN_LAYER_DURATION,
           duration,
         );
+        newEnd = snapTo(newEnd, snapPoints, snapThreshold);
+        newEnd = clamp(newEnd, startStart + MIN_LAYER_DURATION, duration);
         onPatch({ end_time: newEnd });
       }
     }

@@ -92,6 +92,30 @@ def template_preview_path(template_id: int) -> Path:
     return template_dir(template_id) / "preview.mp4"
 
 
+def cleanup_orphan_temp_uploads(max_age_hours: int = 24) -> int:
+    """Delete files in /data/temp older than max_age_hours.
+    These are user video uploads from a render dialog the user abandoned.
+    Returns the number of files deleted."""
+    import time
+
+    if not TEMP_DIR.is_dir():
+        return 0
+    cutoff = time.time() - max_age_hours * 3600
+    deleted = 0
+    for p in TEMP_DIR.iterdir():
+        if not p.is_file():
+            continue
+        try:
+            if p.stat().st_mtime < cutoff:
+                p.unlink(missing_ok=True)
+                deleted += 1
+        except Exception as e:
+            log.warning("failed to clean %s: %s", p, e)
+    if deleted:
+        log.info("Cleaned %d orphan temp upload(s) older than %dh", deleted, max_age_hours)
+    return deleted
+
+
 def template_dir(template_id: int) -> Path:
     return TEMPLATES_DIR / str(template_id)
 

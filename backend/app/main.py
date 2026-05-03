@@ -16,7 +16,12 @@ from app.api.templates import router as templates_router
 from app.auth.routes import router as auth_router
 from app.config import settings
 from app.middleware import AuthMiddleware
-from app.storage import ensure_dirs, ensure_placeholder_preview, install_builtin_fonts
+from app.storage import (
+    cleanup_orphan_temp_uploads,
+    ensure_dirs,
+    ensure_placeholder_preview,
+    install_builtin_fonts,
+)
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +51,11 @@ async def lifespan(app: FastAPI):
         ensure_placeholder_preview()
     except Exception as e:
         log.exception("ensure_placeholder_preview failed: %s", e)
+
+    try:
+        cleanup_orphan_temp_uploads(max_age_hours=24)
+    except Exception as e:
+        log.exception("cleanup_orphan_temp_uploads failed: %s", e)
 
     # Migrations are no longer run at boot — they hang on Railway when
     # DATABASE_URL is misconfigured. Run them manually after deploy via

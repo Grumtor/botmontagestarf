@@ -59,9 +59,10 @@ export function EditorCanvas() {
   );
   const activeClip = active ? clips[active.clipIndex] : null;
   const activeIsFixed = activeClip?.type === "fixed";
+  const activeIsImage = activeClip?.type === "image";
 
   const activeFileUrl =
-    template && activeIsFixed && activeClip?.file_id
+    template && activeClip && (activeClip.type === "fixed" || activeClip.type === "image")
       ? `/api/files/template_clip/${template.id}/${activeClip.file_id}`
       : null;
 
@@ -125,6 +126,16 @@ export function EditorCanvas() {
             className="absolute inset-0 h-full w-full object-cover"
             playsInline
             preload="auto"
+          />
+        )}
+
+        {activeIsImage && activeFileUrl && (
+          <img
+            key={activeFileUrl}
+            src={activeFileUrl}
+            alt=""
+            draggable={false}
+            className="absolute inset-0 h-full w-full select-none object-cover"
           />
         )}
 

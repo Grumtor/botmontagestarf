@@ -97,6 +97,27 @@ def gather_render_inputs(
                     audio_volume=audio_volume,
                 )
             )
+        elif ctype == "image":
+            file_id = clip.get("file_id")
+            if not file_id:
+                raise ValueError(f"Image clip {clip.get('id')!r} has no file_id")
+            path = _find_with_glob(template_clips_dir(template_id), file_id)
+            if path is None:
+                raise ValueError(
+                    f"Image clip file {file_id!r} missing on disk for template {template_id}"
+                )
+            target_dur = float(clip.get("duration_sec", 3.0))
+            resolved_clips.append(
+                ClipInput(
+                    path=path,
+                    trim_in=0,
+                    trim_out=None,
+                    audio_enabled=False,
+                    audio_volume=0.0,
+                    target_duration=target_dur,
+                    is_image=True,
+                )
+            )
         elif ctype == "placeholder":
             clip_id = clip.get("id")
             token = fills.get(clip_id)

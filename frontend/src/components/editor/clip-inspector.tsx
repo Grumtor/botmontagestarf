@@ -16,6 +16,7 @@ export function ClipInspector({ clip }: Props) {
 
   const isFixed = clip.type === "fixed";
   const isPlaceholder = clip.type === "placeholder";
+  const isImage = clip.type === "image";
 
   return (
     <div className="space-y-4">
@@ -24,7 +25,7 @@ export function ClipInspector({ clip }: Props) {
           Type
         </div>
         <div className="text-sm font-medium">
-          {isFixed ? "Vidéo fixe" : "Placeholder"}
+          {isFixed ? "Vidéo fixe" : isImage ? "Image fixe" : "Placeholder"}
         </div>
       </div>
 
@@ -54,6 +55,22 @@ export function ClipInspector({ clip }: Props) {
         </Section>
       )}
 
+      {isImage && (
+        <Section title="Durée affichage (s)">
+          <NumberField
+            label="Durée"
+            value={clip.duration_sec}
+            step={0.1}
+            onChange={(v) =>
+              patchClip(clip.id, { duration_sec: Math.max(0.1, v) })
+            }
+          />
+          <p className="text-[10px] text-muted-foreground">
+            L&apos;image sera affichée pendant cette durée dans le reel final.
+          </p>
+        </Section>
+      )}
+
       {isPlaceholder && (
         <Section title="Durée placeholder (s)">
           <NumberField
@@ -71,7 +88,8 @@ export function ClipInspector({ clip }: Props) {
         </Section>
       )}
 
-      <Section title="Audio">
+      {!isImage && (
+        <Section title="Audio">
         <button
           type="button"
           onClick={() =>
@@ -115,7 +133,8 @@ export function ClipInspector({ clip }: Props) {
             />
           </label>
         )}
-      </Section>
+        </Section>
+      )}
 
       <Button
         variant="destructive"

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Film, Square } from "lucide-react";
+import { Film, ImageIcon, Square } from "lucide-react";
 
 import { Templates } from "@/lib/api";
 import { useEditorStore } from "@/store/editor";
@@ -11,7 +11,7 @@ import {
 } from "@/lib/editor-types";
 import { cn } from "@/lib/utils";
 
-const ALLOWED_VIDEO_EXTS = [".mp4", ".mov"];
+const ALLOWED_DROP_EXTS = [".mp4", ".mov", ".png", ".jpg", ".jpeg"];
 
 type Props = {
   pxPerSec: number;
@@ -35,6 +35,7 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
   const reorder = useEditorStore((s) => s.reorderClips);
   const patchClip = useEditorStore((s) => s.patchClip);
   const addFixed = useEditorStore((s) => s.addFixedClip);
+  const addImageClip = useEditorStore((s) => s.addImageClip);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropHover, setDropHover] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -55,17 +56,17 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
     function onMove(ev: MouseEvent) {
       const dt = (ev.clientX - startX) / pxPerSec;
 
-      if (clip.type === "placeholder") {
+      if (clip.type === "placeholder" || clip.type === "image") {
         if (edge === "right") {
           patchClip(clip.id, {
             duration_sec: Math.max(0.1, clip.duration_sec + dt),
           });
         }
-        // left edge: noop for placeholder for now (no in-source time).
+        // left edge: noop (no in-source time for placeholders/images).
         return;
       }
 
-      // Fixed clip
+      // Fixed video clip
       if (edge === "right") {
         const maxOut = clip.source_duration_sec ?? Infinity;
         const initOut = clip.trim_out ?? clip.source_duration_sec ?? 0;
@@ -93,14 +94,18 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
     const valid: File[] = [];
     for (const f of Array.from(files)) {
       const lower = f.name.toLowerCase();
-      if (ALLOWED_VIDEO_EXTS.some((e) => lower.endsWith(e))) valid.push(f);
+      if (ALLOWED_DROP_EXTS.some((e) => lower.endsWith(e))) valid.push(f);
     }
     if (valid.length === 0) return;
     setUploading(true);
     try {
       for (const f of valid) {
         const res = await Templates.uploadClip(template.id, f);
-        addFixed(res.file_id, res.duration_sec, res.width, res.height);
+        if (res.kind === "image") {
+          addImageClip(res.file_id, res.width, res.height);
+        } else {
+          addFixed(res.file_id, res.duration_sec, res.width, res.height);
+        }
       }
     } finally {
       setUploading(false);
@@ -141,10 +146,12 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
         const left = starts[i] * pxPerSec;
         const w = Math.max(dur * pxPerSec, 8);
         const isPlaceholder = clip.type === "placeholder";
+        const isImage = clip.type === "image";
+        const isFixed = clip.type === "fixed";
         const isSelected = clip.id === selectedClipId;
 
         const thumbUrl =
-          template && clip.type === "fixed"
+          template && (isFixed || isImage)
             ? `/api/files/template_clip_thumb/${template.id}/${clip.file_id}`
             : null;
 
@@ -174,7 +181,9 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
               "absolute top-1 cursor-pointer overflow-hidden rounded-md border-2 transition",
               isPlaceholder
                 ? "border-dashed border-yellow-500/70 bg-yellow-700/30"
-                : "border-solid border-transparent bg-sky-700/80 hover:bg-sky-600/80",
+                : isImage
+                  ? "border-solid border-transparent bg-emerald-700/80 hover:bg-emerald-600/80"
+                  : "border-solid border-transparent bg-sky-700/80 hover:bg-sky-600/80",
               isSelected && "border-foreground shadow-lg",
             )}
             style={{
@@ -182,16 +191,18 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
               width: w,
               height: "calc(100% - 8px)",
               backgroundImage: thumbUrl ? `url(${thumbUrl})` : undefined,
-              backgroundSize: "auto 100%",
-              backgroundRepeat: "repeat-x",
+              backgroundSize: isImage ? "cover" : "auto 100%",
+              backgroundRepeat: isImage ? "no-repeat" : "repeat-x",
+              backgroundPosition: "center",
             }}
             title={
               isPlaceholder
                 ? `Placeholder · ${dur.toFixed(1)}s`
-                : `Clip · ${dur.toFixed(1)}s`
+                : isImage
+                  ? `Image · ${dur.toFixed(1)}s`
+                  : `Clip · ${dur.toFixed(1)}s`
             }
           >
-            {/* Tinted overlay for readability */}
             <div
               className={cn(
                 "absolute inset-0",
@@ -199,7 +210,6 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
               )}
             />
 
-            {/* Trim handles */}
             <div
               onMouseDown={(e) => startTrim(e, i, "left")}
               className="absolute left-0 top-0 z-10 h-full w-2 cursor-ew-resize bg-foreground/30 hover:bg-foreground/60"
@@ -209,15 +219,20 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
               className="absolute right-0 top-0 z-10 h-full w-2 cursor-ew-resize bg-foreground/30 hover:bg-foreground/60"
             />
 
-            {/* Label */}
             <div className="absolute left-3 top-1.5 z-[1] flex items-center gap-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
               {isPlaceholder ? (
                 <Square className="h-3 w-3" />
+              ) : isImage ? (
+                <ImageIcon className="h-3 w-3" />
               ) : (
                 <Film className="h-3 w-3" />
               )}
               <span className="truncate">
-                {isPlaceholder ? "Placeholder" : `Clip ${i + 1}`}
+                {isPlaceholder
+                  ? "Placeholder"
+                  : isImage
+                    ? `Image ${i + 1}`
+                    : `Clip ${i + 1}`}
                 {" · "}
                 {dur.toFixed(1)}s
               </span>

@@ -8,6 +8,7 @@ import {
   type Clip,
   type FixedClip,
   type FontMeta,
+  type ImageClip,
   type Layer,
   type LayerType,
   type PlaceholderClip,
@@ -17,6 +18,7 @@ import {
 import {
   defaultLayerData,
   makeFixedClip,
+  makeImageClip,
   makePlaceholderClip,
 } from "@/lib/editor-types";
 
@@ -55,6 +57,12 @@ type EditorState = {
     width: number | null,
     height: number | null,
   ) => FixedClip;
+  addImageClip: (
+    fileId: string,
+    width: number | null,
+    height: number | null,
+    durationSec?: number,
+  ) => ImageClip;
   addPlaceholderClip: (durationSec?: number) => PlaceholderClip;
   patchClip: (id: string, patch: Partial<Clip>) => void;
   deleteClip: (id: string) => void;
@@ -150,6 +158,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   addFixedClip: (fileId, durationSec, width, height) => {
     const clip = makeFixedClip(fileId, durationSec, width, height);
+    set((s) => ({ clips: [...s.clips, clip], selectedClipId: clip.id }));
+    schedule(get);
+    return clip;
+  },
+
+  addImageClip: (fileId, width, height, durationSec = 3.0) => {
+    const clip = makeImageClip(fileId, width, height, durationSec);
     set((s) => ({ clips: [...s.clips, clip], selectedClipId: clip.id }));
     schedule(get);
     return clip;

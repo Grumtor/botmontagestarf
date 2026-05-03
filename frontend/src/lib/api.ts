@@ -145,13 +145,20 @@ export const ClipBaseSchema = z.object({
 export const FixedClipSchema = ClipBaseSchema.extend({
   type: z.literal("fixed"),
   file_id: z.string(),
-  // Cached at upload time so the editor can render the timeline correctly
-  // without re-probing.
   source_duration_sec: z.number().nullable().default(null),
   source_width: z.number().nullable().default(null),
   source_height: z.number().nullable().default(null),
 });
 export type FixedClip = z.infer<typeof FixedClipSchema>;
+
+export const ImageClipSchema = ClipBaseSchema.extend({
+  type: z.literal("image"),
+  file_id: z.string(),
+  duration_sec: z.number().default(3.0),
+  source_width: z.number().nullable().default(null),
+  source_height: z.number().nullable().default(null),
+});
+export type ImageClip = z.infer<typeof ImageClipSchema>;
 
 export const PlaceholderClipSchema = ClipBaseSchema.extend({
   type: z.literal("placeholder"),
@@ -161,6 +168,7 @@ export type PlaceholderClip = z.infer<typeof PlaceholderClipSchema>;
 
 export const ClipSchema = z.discriminatedUnion("type", [
   FixedClipSchema,
+  ImageClipSchema,
   PlaceholderClipSchema,
 ]);
 export type Clip = z.infer<typeof ClipSchema>;
@@ -218,6 +226,7 @@ export type TemplateUpdateInput = z.infer<typeof TemplateUpdateSchema>;
 
 const ClipUploadResponseSchema = z.object({
   file_id: z.string(),
+  kind: z.enum(["video", "image"]).default("video"),
   duration_sec: z.number().nullable(),
   width: z.number().nullable(),
   height: z.number().nullable(),

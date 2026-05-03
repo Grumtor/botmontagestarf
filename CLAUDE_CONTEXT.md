@@ -2,8 +2,8 @@
 
 > Document interne pour Claude. À lire en cas de perte de contexte. À mettre à jour à chaque prompt/changement majeur.
 >
-> **Last updated**: après Phase 3 (dialog "Lance un render" sur les templates)
-> **Next planned**: à définir avec l'utilisateur — possibles : multi-template batch, cleanup `/data/temp` orphelins, polish UI, retours d'usage réel
+> **Last updated**: après Phase 4 (cleanup + image clips on main track + magnetic snap + dashboard quick render + UX agent report)
+> **Next planned**: appliquer les recommandations du rapport UX agent (Top 5 problèmes + polish) — voir section 13
 
 ---
 
@@ -437,6 +437,7 @@ L'app a vécu un **pivot majeur entre la Phase 1 originelle et la Phase 1 du mod
 | **Pivot Phase 2.5** | mai 2026 | UX timeline : 55vh, action bar avec 7 boutons "+", thumbnails clips inline (`make_video_thumb` 90x160 à l'upload), audio track pliable, drag-drop file from desktop, sidebar gauche sans bouton add. |
 | **Pivot Phase 2.6** | mai 2026 | Détails : emoji picker 80 emojis, timeline resizable (drag handle, persisted localStorage), template card play overlay → video preview, backend cache preview MP4 dans `/data/templates/{id}/preview.mp4`, `_placeholder_preview.mp4` 30s noir pour previews avec placeholders non remplis, fonts-noto-color-emoji ajouté au Dockerfile. |
 | **Phase 3** | mai 2026 | Dialog "Lance un render" sur chaque card template (`run-render-dialog.tsx`). Une dropzone par placeholder, multi-files. Upload via `Render.uploadUserVideo` (token). Rule de pairing : N vidéos par placeholder, même N pour tous → N reels. Pour 0 placeholder = 1 reel. Spoofing toggle avec MODELS / COUNTRIES / LANGUAGES / dateWindow. POST `/api/render/batch` puis `router.push("/jobs/{id}")`. Bouton "Lance un render" violet primaire en bas de chaque card. State `runRenderTarget` dans templates/page.tsx. |
+| **Phase 4** | mai 2026 | (a) Cleanup : drop `store/index.ts`, `dropzone.tsx`, `upload-list.tsx` (orphelins). (b) `/data/temp` cleanup auto au boot (fichiers > 24h). (c) **Image clips on main track** : nouveau ClipType `image`, schéma zod `ImageClipSchema`, store `addImageClip`, helper `makeImageClip`, action bar bouton "+ Image" (icône `ImagePlus`), upload accepte PNG/JPG, pipeline `is_image: True` → ffmpeg input `-loop 1 -framerate FPS -t duration -i path`, audio toujours silent pour image. Color `bg-emerald-700/80` dans clip-track. Drop overlay "+ Image" button (les images vont sur la track principale ; GIF/Emoji restent en overlay). (d) **Magnetic snap** : layer blocks snappent aux clip boundaries (start/end de chaque clip + 0 + total + playhead) avec threshold ~10px. Helper `snapTo()` dans `editor-timeline.tsx`. (e) Dashboard : bouton "Lancer un render" qui ouvre un Dialog picker (3 col) → choix template → ouvre `RunRenderDialog`. (f) Rapport UX agent reçu (gardé pour application séparée). |
 
 ---
 
@@ -468,7 +469,54 @@ Tout existait déjà : `Render.uploadUserVideo`, `Render.batch`, Celery `process
 
 ---
 
-## 13. Conventions de code
+## 13. Rapport UX agent (post-Phase 4)
+
+L'agent UX a produit un rapport complet (à appliquer dans une phase future). Résumé des points clés :
+
+**Top 5 problèmes prioritaires** :
+1. **Timeline trop colorée** : clips bleus + placeholders jaunes + scrubber bleu + lanes colorées → tout crie. Fix : passer les clips fixes en neutre (`bg-zinc-800` avec thumbnail dominante), bleu UNIQUEMENT pour la sélection. Scrubber rouge (`#FF3B30` style FCP). Palette LAYER_COLORS désaturée.
+2. **RunRenderDialog trop jaune** : box jaune sur 60% du dialog = warning anxiogène. Fix : carte neutre `border-l-4 border-yellow-500` + badge `📷 #1`.
+3. **Inspector éditeur = long formulaire** : 14 contrôles à la suite sans groupement. Fix : sections collapsibles `<details>` (Contenu / Style / Position+Timing) avec localStorage pour l'état.
+4. **Bouton Save topbar redondant** (autosave existe). + Sidebar gauche éditeur peu utile. Fix : virer Save, indicateur ✓/spinner discret. Sidebar : virer ou la transformer en panel d'assets.
+5. **Grille templates uniforme** : 4 col, "Lance un render" violet répété N fois = bruit. Fix : déplacer le bouton dans un kebab menu hover, ajouter micro-badges info (`📷 ×3 placeholders`, `⏱ 12s`), passer à 3 col plus aérées.
+
+**Polish (15 items)** :
+- Sidebar app 200px → 64px collapsed icon-only OR 180px
+- Stat cards dashboard en vraies tuiles type Linear
+- Empty states avec illustration SVG
+- Extract `<StatusBadge>` avec pulse animation
+- Réduire échelle typo à 4 tailles strictes
+- Hover shadow sur clips
+- Icône grip sur trim handles
+- Color picker en swatch grid
+- Switch shadcn pour spoofing toggle
+- Action bar grouped avec `bg-background/50` par groupe
+- Microcopy : "Aperçu rendu" → "Prévisualiser"
+- Toast feedback sur upload success/error
+- etc.
+
+**Pistes ambitieuses** :
+- Dashboard "Studio" (hero CTA central → picker template, feed reels done)
+- Inspector contextual flottant ancré (style Figma)
+- Raccourcis clavier (Space play, Suppr, Cmd+S, F fullscreen)
+
+**Direction artistique** :
+- Palette dark "studio" plus chaude
+  - `--background: #0E0E12`
+  - `--card: #18181C`
+  - `--primary: #FA7A2C` (orange Reels identitaire)
+  - `--scrubber: #F03434` (rouge FCP)
+  - `--placeholder: #F5C037` (jaune chaud)
+  - `--accent-info: #2F7AF5` (bleu sélection)
+- Typo : Inter via `next/font/google`, JetBrains Mono ou `tnum` pour timecodes
+- Densité : pages aérées (`gap-8`), éditeur dense (`text-[11px]`, `h-7`)
+- Inspirations : CapCut Web, Descript, Linear, Figma Properties Panel, Instagram Edits
+
+**Plan d'application** : rapport gardé pour une **Phase 5 (Polish UX)** dédiée. Fichier le rapport complet dans la mémoire conversationnelle ou copier dans un `UX_REPORT.md` si nécessaire.
+
+---
+
+## 14. Conventions de code
 
 - **Tailwind classes** : groupées par catégorie (layout / spacing / typo / colors), `cn()` pour merge conditionnel
 - **shadcn components** : importés depuis `@/components/ui/*`, jamais redéfinis
@@ -482,7 +530,7 @@ Tout existait déjà : `Render.uploadUserVideo`, `Render.batch`, Celery `process
 
 ---
 
-## 14. Comment update ce fichier
+## 15. Comment update ce fichier
 
 Quand un changement notable a lieu :
 1. Update la section pertinente (Data model, API surface, Pipeline, etc.)

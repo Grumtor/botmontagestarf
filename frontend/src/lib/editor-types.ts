@@ -2,6 +2,7 @@ import type {
   Clip,
   FixedClip,
   FontId,
+  ImageClip,
   LayerType,
   PlaceholderClip,
 } from "@/lib/api";
@@ -64,6 +65,7 @@ export function clipDuration(clip: Clip): number {
     if (clip.trim_out != null) return Math.max(0, clip.trim_out - clip.trim_in);
     return Math.max(0, (clip.source_duration_sec ?? 0) - clip.trim_in);
   }
+  // image and placeholder both expose duration_sec
   return Math.max(0, clip.duration_sec);
 }
 
@@ -142,5 +144,25 @@ export function makePlaceholderClip(durationSec: number = 3.0): PlaceholderClip 
     trim_out: null,
     audio_enabled: true,
     audio_volume: 1.0,
+  };
+}
+
+export function makeImageClip(
+  fileId: string,
+  width: number | null,
+  height: number | null,
+  durationSec: number = 3.0,
+): ImageClip {
+  return {
+    id: crypto.randomUUID(),
+    type: "image",
+    file_id: fileId,
+    duration_sec: durationSec,
+    source_width: width,
+    source_height: height,
+    trim_in: 0,
+    trim_out: null,
+    audio_enabled: false,
+    audio_volume: 0,
   };
 }
