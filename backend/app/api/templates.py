@@ -1,22 +1,61 @@
-from datetime import datetime
-from typing import Optional
+"""Templates API for the clip-based model.
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+A template owns:
+  - clips: ordered list of clips on the main track. Each is `fixed` (a video
+    file uploaded with the template) or `placeholder` (a slot to be filled by
+    a user-supplied video at render time).
+  - layers: text/image/gif/emoji overlays positioned in time AND on the canvas.
+  - audio_overlay: optional second audio track (music).
+
+Files uploaded for fixed clips and overlay images/audio live under
+/data/templates/{template_id}/. Frontend references them by `file_id` returned
+by the upload endpoint.
+"""
+
+import shutil
+import subprocess
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.db.models import Template, TemplateLanguage
+from app.media import MediaError, video_metadata
+from app.storage import (
+    template_clips_dir,
+    template_dir,
+    template_overlays_dir,
+)
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
 
+UPLOAD_MAX_BYTES = 500 * 1024 * 1024
+CHUNK = 1024 * 1024
+ALLOWED_CLIP_EXTS = {".mp4", ".mov"}
+ALLOWED_OVERLAY_EXTS = {
+    ".png", ".jpg", ".jpeg", ".gif",
+    ".mp3", ".wav", ".m4a",
+}
 
-# ---- schemas ------------------------------------------------------------
+
+# ---- schemas ---------------------------------------------------------
 
 class TemplateBase(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     language: TemplateLanguage = TemplateLanguage.US
-    duration_sec: float = Field(default=5.0, ge=1.0, le=90.0)
     description: Optional[str] = None
 
 
@@ -27,11 +66,9 @@ class TemplateCreate(TemplateBase):
 class TemplateUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     language: Optional[TemplateLanguage] = None
-    duration_sec: Optional[float] = Field(default=None, ge=1.0, le=90.0)
     description: Optional[str] = None
+    clips: Optional[list] = None
     layers: Optional[list] = None
-    source_segments: Optional[list] = None
-    audio_source: Optional[dict] = None
     audio_overlay: Optional[dict] = None
 
 
@@ -41,48 +78,44 @@ class TemplateRead(BaseModel):
     id: int
     name: str
     description: Optional[str]
-    duration_sec: float
     language: TemplateLanguage
+    clips: list
     layers: list
-    source_segments: list
-    audio_source: dict
     audio_overlay: dict
     thumbnail_path: Optional[str]
     created_at: datetime
     updated_at: datetime
 
 
-def _default_segments(duration_sec: float) -> list:
-    return [
-        {
-            "in_time": 0.0,
-            "out_time": float(duration_sec),
-            "transition_to_next": {"type": "cut", "duration": 0.3},
-        }
-    ]
+class ClipUploadResponse(BaseModel):
+    file_id: str
+    duration_sec: Optional[float]
+    width: Optional[int]
+    height: Optional[int]
 
 
-def _default_audio_source() -> dict:
-    return {"volume": 1.0, "enabled": True}
+class OverlayUploadResponse(BaseModel):
+    file_id: str
 
 
-def _default_audio_overlay() -> dict:
-    return {"asset_id": None, "volume": 1.0, "start_offset": 0.0, "trim_in": 0.0}
-
-
-# ---- routes -------------------------------------------------------------
+# ---- routes ----------------------------------------------------------
 
 @router.post("", response_model=TemplateRead, status_code=status.HTTP_201_CREATED)
-def create_template(payload: TemplateCreate, db: Session = Depends(get_db)) -> Template:
+def create_template(
+    payload: TemplateCreate, db: Session = Depends(get_db)
+) -> Template:
     template = Template(
         name=payload.name,
         language=payload.language,
-        duration_sec=payload.duration_sec,
         description=payload.description,
+        clips=[],
         layers=[],
-        source_segments=_default_segments(payload.duration_sec),
-        audio_source=_default_audio_source(),
-        audio_overlay=_default_audio_overlay(),
+        audio_overlay={
+            "file_id": None,
+            "volume": 1.0,
+            "start_offset": 0.0,
+            "trim_in": 0.0,
+        },
     )
     db.add(template)
     db.commit()
@@ -95,10 +128,10 @@ def list_templates(
     language: Optional[TemplateLanguage] = Query(default=None),
     db: Session = Depends(get_db),
 ) -> list[Template]:
-    query = db.query(Template)
+    q = db.query(Template)
     if language is not None:
-        query = query.filter(Template.language == language)
-    return query.order_by(Template.updated_at.desc()).all()
+        q = q.filter(Template.language == language)
+    return q.order_by(Template.updated_at.desc()).all()
 
 
 @router.get("/{template_id}", response_model=TemplateRead)
@@ -116,10 +149,8 @@ def update_template(
     template = db.get(Template, template_id)
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")
-
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(template, field, value)
-
     db.commit()
     db.refresh(template)
     return template
@@ -130,32 +161,165 @@ def delete_template(template_id: int, db: Session = Depends(get_db)) -> None:
     template = db.get(Template, template_id)
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")
+    # Wipe the per-template folder (clips + overlays + thumbnail).
+    shutil.rmtree(template_dir(template_id), ignore_errors=True)
     db.delete(template)
     db.commit()
 
 
-@router.post("/{template_id}/duplicate", response_model=TemplateRead, status_code=status.HTTP_201_CREATED)
-def duplicate_template(template_id: int, db: Session = Depends(get_db)) -> Template:
-    source = db.get(Template, template_id)
-    if source is None:
+@router.post(
+    "/{template_id}/duplicate",
+    response_model=TemplateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def duplicate_template(
+    template_id: int, db: Session = Depends(get_db)
+) -> Template:
+    src = db.get(Template, template_id)
+    if src is None:
         raise HTTPException(status_code=404, detail="Template not found")
 
     clone = Template(
-        name=f"{source.name} (copy)",
-        description=source.description,
-        duration_sec=source.duration_sec,
-        language=source.language,
-        layers=list(source.layers) if source.layers else [],
-        source_segments=(
-            list(source.source_segments)
-            if source.source_segments
-            else _default_segments(source.duration_sec)
-        ),
-        audio_source=dict(source.audio_source) if source.audio_source else _default_audio_source(),
-        audio_overlay=dict(source.audio_overlay) if source.audio_overlay else _default_audio_overlay(),
-        thumbnail_path=source.thumbnail_path,
+        name=f"{src.name} (copy)",
+        description=src.description,
+        language=src.language,
+        clips=[],
+        layers=list(src.layers or []),
+        audio_overlay=dict(src.audio_overlay or {}),
     )
     db.add(clone)
     db.commit()
     db.refresh(clone)
+
+    # Copy the source template's clip + overlay files under the new ID,
+    # preserving file_ids so the cloned `clips`/`layers`/`audio_overlay`
+    # references still resolve.
+    new_clips: list[dict] = []
+    for clip in src.clips or []:
+        c = dict(clip)
+        if c.get("type") == "fixed" and c.get("file_id"):
+            old_dir = template_clips_dir(src.id)
+            new_dir = template_clips_dir(clone.id)
+            for f in old_dir.glob(f"{c['file_id']}.*"):
+                shutil.copy(f, new_dir / f.name)
+        new_clips.append(c)
+    clone.clips = new_clips
+
+    src_overlays = template_overlays_dir(src.id)
+    if src_overlays.is_dir():
+        new_overlays = template_overlays_dir(clone.id)
+        for f in src_overlays.iterdir():
+            shutil.copy(f, new_overlays / f.name)
+
+    db.commit()
+    db.refresh(clone)
     return clone
+
+
+# ---- file uploads scoped to a template -------------------------------
+
+async def _stream_to_disk(file: UploadFile, dest: Path) -> int:
+    total = 0
+    try:
+        with dest.open("wb") as out:
+            while True:
+                chunk = await file.read(CHUNK)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > UPLOAD_MAX_BYTES:
+                    raise HTTPException(
+                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        f"File too large (max {UPLOAD_MAX_BYTES // (1024 * 1024)} MB)",
+                    )
+                out.write(chunk)
+    except HTTPException:
+        dest.unlink(missing_ok=True)
+        raise
+    return total
+
+
+@router.post(
+    "/{template_id}/clips/upload",
+    response_model=ClipUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_clip(
+    template_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> ClipUploadResponse:
+    """Upload a fixed video clip for a template. Returns a file_id the
+    frontend embeds in `template.clips[i].file_id`."""
+    if db.get(Template, template_id) is None:
+        raise HTTPException(404, "Template not found")
+
+    original = file.filename or "clip.mp4"
+    ext = Path(original).suffix.lower()
+    if ext not in ALLOWED_CLIP_EXTS:
+        raise HTTPException(
+            400, f"Unsupported extension {ext!r}; allowed: mp4, mov"
+        )
+
+    file_id = uuid.uuid4().hex
+    dest = template_clips_dir(template_id) / f"{file_id}{ext}"
+    await _stream_to_disk(file, dest)
+
+    duration: Optional[float]
+    width: Optional[int]
+    height: Optional[int]
+    try:
+        duration, width, height = video_metadata(dest)
+    except MediaError:
+        duration, width, height = (None, None, None)
+
+    return ClipUploadResponse(
+        file_id=file_id,
+        duration_sec=duration,
+        width=width,
+        height=height,
+    )
+
+
+@router.post(
+    "/{template_id}/overlays/upload",
+    response_model=OverlayUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_overlay(
+    template_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> OverlayUploadResponse:
+    """Upload an image/gif/audio used by a layer or audio_overlay of a
+    specific template."""
+    if db.get(Template, template_id) is None:
+        raise HTTPException(404, "Template not found")
+
+    original = file.filename or "overlay"
+    ext = Path(original).suffix.lower()
+    if ext not in ALLOWED_OVERLAY_EXTS:
+        raise HTTPException(
+            400,
+            f"Unsupported extension {ext!r}; allowed: "
+            f"{', '.join(sorted(ALLOWED_OVERLAY_EXTS))}",
+        )
+
+    file_id = uuid.uuid4().hex
+    dest = template_overlays_dir(template_id) / f"{file_id}{ext}"
+    await _stream_to_disk(file, dest)
+
+    return OverlayUploadResponse(file_id=file_id)
+
+
+def find_template_file(template_id: int, file_id: str, kind: str) -> Optional[Path]:
+    """Look up the on-disk path of a clip or overlay file by its file_id.
+    `kind` ∈ {'clip', 'overlay'}."""
+    base = (
+        template_clips_dir(template_id)
+        if kind == "clip"
+        else template_overlays_dir(template_id)
+    )
+    for p in base.glob(f"{file_id}.*"):
+        return p
+    return None

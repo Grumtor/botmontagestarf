@@ -1,9 +1,13 @@
+"""Font asset management. In the new clip-based model, fonts are the only
+persistent library. All other "assets" (images, audio, gifs, emojis used in a
+template) are uploaded per-template into /data/templates/{id}/."""
+
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -13,16 +17,9 @@ from app.storage import ASSET_DIRS
 
 router = APIRouter(prefix="/api/assets", tags=["assets"])
 
-MAX_BYTES = 500 * 1024 * 1024
+MAX_BYTES = 50 * 1024 * 1024  # 50 MB is plenty for a font file
 CHUNK = 1024 * 1024
-
-ALLOWED_EXTS_BY_TYPE: dict[AssetType, set[str]] = {
-    AssetType.image: {".png", ".jpg", ".jpeg"},
-    AssetType.gif: {".gif"},
-    AssetType.emoji: {".png", ".jpg", ".jpeg"},
-    AssetType.font: {".ttf", ".otf"},
-    AssetType.audio: {".mp3", ".wav", ".m4a"},
-}
+ALLOWED_FONT_EXTS = {".ttf", ".otf"}
 
 
 class AssetRead(BaseModel):
@@ -35,22 +32,20 @@ class AssetRead(BaseModel):
 
 
 @router.post("/upload", response_model=AssetRead, status_code=status.HTTP_201_CREATED)
-async def upload_asset(
-    type: AssetType = Query(...),
+async def upload_font(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> Asset:
     original = file.filename or "unknown"
     ext = Path(original).suffix.lower()
-    allowed = ALLOWED_EXTS_BY_TYPE[type]
-    if ext not in allowed:
+    if ext not in ALLOWED_FONT_EXTS:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"Unsupported extension {ext!r} for type {type.value!r}; allowed: {', '.join(sorted(allowed))}",
+            f"Only TTF/OTF fonts can be uploaded as persistent assets",
         )
 
     file_uuid = uuid.uuid4().hex
-    dest_dir = ASSET_DIRS[type.value]
+    dest_dir = ASSET_DIRS["font"]
     dest = dest_dir / f"{file_uuid}{ext}"
 
     total = 0
@@ -70,11 +65,8 @@ async def upload_asset(
     except HTTPException:
         dest.unlink(missing_ok=True)
         raise
-    except Exception:
-        dest.unlink(missing_ok=True)
-        raise
 
-    rec = Asset(type=type, file_path=str(dest), name=original)
+    rec = Asset(type=AssetType.font, file_path=str(dest), name=original)
     db.add(rec)
     db.commit()
     db.refresh(rec)
@@ -82,22 +74,20 @@ async def upload_asset(
 
 
 @router.get("", response_model=list[AssetRead])
-def list_assets(
-    type: Optional[AssetType] = Query(default=None),
-    db: Session = Depends(get_db),
-) -> list[Asset]:
-    q = db.query(Asset)
-    if type is not None:
-        q = q.filter(Asset.type == type)
-    return q.order_by(Asset.uploaded_at.desc()).all()
+def list_fonts(db: Session = Depends(get_db)) -> list[Asset]:
+    return (
+        db.query(Asset)
+        .filter(Asset.type == AssetType.font)
+        .order_by(Asset.uploaded_at.desc())
+        .all()
+    )
 
 
 @router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_asset(asset_id: int, db: Session = Depends(get_db)) -> None:
+def delete_font(asset_id: int, db: Session = Depends(get_db)) -> None:
     rec = db.get(Asset, asset_id)
-    if rec is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Asset not found")
-
+    if rec is None or rec.type != AssetType.font:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Font not found")
     Path(rec.file_path).unlink(missing_ok=True)
     db.delete(rec)
     db.commit()

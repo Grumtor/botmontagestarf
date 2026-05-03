@@ -6,22 +6,23 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 DATA_DIR = Path("/data")
-SOURCES_DIR = DATA_DIR / "sources"
-SOURCE_THUMBS_DIR = SOURCES_DIR / "thumbs"
-ASSETS_DIR = DATA_DIR / "assets"
-RENDERS_DIR = DATA_DIR / "renders"
 
+# Persistent font library (Inter, Montserrat + user uploads).
+ASSETS_DIR = DATA_DIR / "assets"
 ASSET_DIRS: dict[str, Path] = {
-    "image": ASSETS_DIR / "images",
-    "gif": ASSETS_DIR / "gifs",
-    "emoji": ASSETS_DIR / "emojis",
     "font": ASSETS_DIR / "fonts",
-    "audio": ASSETS_DIR / "audio",
 }
 
-# Built-in (non-deletable) font slugs and their candidate source paths
-# from the apt packages installed by the Dockerfile. We try each path
-# until one exists, then copy it to /data/assets/fonts/{slug}{ext}.
+# Per-template assets (fixed clips + overlays uploaded for a specific template).
+TEMPLATES_DIR = DATA_DIR / "templates"
+
+# Temp storage for user-uploaded videos awaiting a render batch (one file per
+# token). Cleaned up after the job that consumed them completes.
+TEMP_DIR = DATA_DIR / "temp"
+
+# Final outputs of render jobs.
+RENDERS_DIR = DATA_DIR / "renders"
+
 BUILTIN_FONTS_META: dict[str, str] = {
     "inter": "Inter",
     "montserrat": "Montserrat",
@@ -43,8 +44,34 @@ BUILTIN_FONT_SOURCES: dict[str, list[str]] = {
 
 
 def ensure_dirs() -> None:
-    for d in (SOURCES_DIR, SOURCE_THUMBS_DIR, ASSETS_DIR, RENDERS_DIR, *ASSET_DIRS.values()):
+    for d in (
+        ASSETS_DIR,
+        TEMPLATES_DIR,
+        TEMP_DIR,
+        RENDERS_DIR,
+        *ASSET_DIRS.values(),
+    ):
         d.mkdir(parents=True, exist_ok=True)
+
+
+def template_dir(template_id: int) -> Path:
+    return TEMPLATES_DIR / str(template_id)
+
+
+def template_clips_dir(template_id: int) -> Path:
+    p = template_dir(template_id) / "clips"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def template_overlays_dir(template_id: int) -> Path:
+    p = template_dir(template_id) / "overlays"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def template_thumb_path(template_id: int) -> Path:
+    return template_dir(template_id) / "thumb.jpg"
 
 
 def builtin_font_path(font_id: str) -> Optional[Path]:
@@ -58,8 +85,8 @@ def builtin_font_path(font_id: str) -> Optional[Path]:
 
 
 def install_builtin_fonts() -> None:
-    """Copy bundled Inter/Montserrat from the apt packages to /data/assets/fonts.
-    No-op if the destination already exists."""
+    """Copy bundled Inter/Montserrat from apt packages to /data/assets/fonts.
+    No-op if already installed."""
     for font_id, candidates in BUILTIN_FONT_SOURCES.items():
         if builtin_font_path(font_id) is not None:
             continue
@@ -72,6 +99,6 @@ def install_builtin_fonts() -> None:
                 break
         else:
             log.warning(
-                "Built-in font %r not installed: none of the candidate paths exist (apt package missing?)",
+                "Built-in font %r not installed: none of the candidate paths exist",
                 font_id,
             )

@@ -1,5 +1,19 @@
+"""Render jobs API.
+
+POST /api/render/batch
+  body:
+    {
+      "name": "...",
+      "assignments": [
+        { "template_id": int, "fills": { "<placeholder_clip_id>": "<token>" } },
+        ...
+      ],
+      "metadata_profile": { ... }
+    }
+"""
+
 from datetime import datetime
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -7,18 +21,16 @@ from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
 from app.db import get_db
-from app.db.models import JobStatus, RenderJob, Template, VideoSource
+from app.db.models import JobStatus, RenderJob, Template
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 
 MAX_RENDERS_PER_BATCH = 50
 
 
-# ---- schemas ----------------------------------------------------------
-
 class Assignment(BaseModel):
-    source_id: int
     template_id: int
+    fills: dict[str, str] = Field(default_factory=dict)
 
 
 class MetadataProfile(BaseModel):
@@ -67,11 +79,8 @@ class JobSummary(BaseModel):
 
 class DashboardStats(BaseModel):
     template_count: int
-    source_count: int
     render_count: int
 
-
-# ---- routes -----------------------------------------------------------
 
 @router.post(
     "/render/batch",
@@ -83,26 +92,16 @@ def create_batch(
 ) -> RenderJob:
     if len(payload.assignments) > MAX_RENDERS_PER_BATCH:
         raise HTTPException(
-            status_code=400,
-            detail=f"Max {MAX_RENDERS_PER_BATCH} renders per batch",
+            400, f"Max {MAX_RENDERS_PER_BATCH} renders per batch"
         )
 
-    # Validate referenced templates and sources exist.
     template_ids = {a.template_id for a in payload.assignments}
-    source_ids = {a.source_id for a in payload.assignments}
-    found_templates = {
+    found = {
         t.id for t in db.query(Template).filter(Template.id.in_(template_ids)).all()
     }
-    found_sources = {
-        s.id for s in db.query(VideoSource).filter(VideoSource.id.in_(source_ids)).all()
-    }
-    missing_t = template_ids - found_templates
-    missing_s = source_ids - found_sources
-    if missing_t or missing_s:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown template_ids={sorted(missing_t)} source_ids={sorted(missing_s)}",
-        )
+    missing = template_ids - found
+    if missing:
+        raise HTTPException(400, f"Unknown template_ids={sorted(missing)}")
 
     job = RenderJob(
         name=payload.name,
@@ -150,7 +149,7 @@ def list_jobs(
 def get_job(job_id: int, db: Session = Depends(get_db)) -> RenderJob:
     job = db.get(RenderJob, job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(404, "Job not found")
     return job
 
 
@@ -158,6 +157,5 @@ def get_job(job_id: int, db: Session = Depends(get_db)) -> RenderJob:
 def dashboard_stats(db: Session = Depends(get_db)) -> DashboardStats:
     return DashboardStats(
         template_count=db.query(Template).count(),
-        source_count=db.query(VideoSource).count(),
         render_count=db.query(RenderJob).count(),
     )

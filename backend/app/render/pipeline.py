@@ -1,36 +1,34 @@
-"""Central ffmpeg pipeline.
+"""Clip-based ffmpeg pipeline.
 
-build_filter_complex(template, **ctx) is the single function that converts a
-template into an ffmpeg filter graph. Used by:
+A template's main track is a list of clips:
+  - `fixed`       → references a video file uploaded with the template
+  - `placeholder` → at render time, gets filled by a user-supplied video
 
-    - POST /api/render/preview  (fast, 720p, no overlays)
-    - process_render_job task   (full quality, all overlays)
+For each render we:
+  1. Resolve every placeholder clip to a real source file.
+  2. For each clip, build a video+audio sub-chain (trim/scale to 1080×1920
+     centred crop, optional audio at the clip's volume).
+  3. Concat all clip sub-chains into a single video+audio stream.
+  4. Apply text/image/gif/emoji overlays on top.
+  5. Mix in the optional `audio_overlay` (background music) on the audio.
+  6. Encode H.264/AAC.
 
-Pipeline order:
-  1. Source segments → trim each + concat
-  2. Effect layers (with timeline enable)
-  3. Animation layers (zoom/pan/shake expressions)
-  4. Final scale + crop to output WxH
-  5. Visual overlays in z_index order:
-        - text  → drawtext (highlight via box=1, stroke via bordercolor)
-        - image / gif / emoji → scale [+ rotate] + overlay
-  6. Audio chain (source per-segment trim+concat+volume + overlay adelay,
-                  optional amix)
+Text drawtext + image/gif overlay logic is shared with the live preview path.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-OUTPUT_W = 720
-OUTPUT_H = 1280
+OUTPUT_W = 1080
+OUTPUT_H = 1920
 
 
-# ---- escapes ----------------------------------------------------------
+# ---- escapes ---------------------------------------------------------
 
 def _esc_drawtext(text: str) -> str:
-    """Escape arbitrary text for an unquoted drawtext text= value."""
     out: list[str] = []
     for ch in text:
         if ch in "\\:,'%":
@@ -41,134 +39,36 @@ def _esc_drawtext(text: str) -> str:
 
 
 def _esc_path(path: str) -> str:
-    """Escape a fontfile path for drawtext."""
     return path.replace("\\", "\\\\").replace(":", "\\:")
 
 
-# ---- effects ----------------------------------------------------------
+# ---- inputs ----------------------------------------------------------
 
-def _effect_filter(layer: dict) -> Optional[str]:
-    data = layer.get("data") or {}
-    kind = data.get("type", "saturation")
-    force = float(data.get("force", 0))
-    if kind == "saturation":
-        sat = max(0.0, 1.0 + force / 100.0)
-        return f"eq=saturation={sat:.3f}"
-    if kind == "brightness":
-        b = max(-1.0, min(1.0, force / 100.0))
-        return f"eq=brightness={b:.3f}"
-    if kind == "contrast":
-        c = max(0.0, 1.0 + force / 100.0)
-        return f"eq=contrast={c:.3f}"
-    if kind == "vignette":
-        return "vignette=PI/4"
-    if kind == "blur":
-        r = max(0.0, min(20.0, force / 100.0 * 20))
-        return f"boxblur={r:.2f}:1"
-    return None
+@dataclass
+class ClipInput:
+    """One ffmpeg `-i` input corresponding to one clip on the main track."""
+    path: Path
+    trim_in: float
+    trim_out: Optional[float]   # None = take everything from trim_in to end
+    audio_enabled: bool
+    audio_volume: float
 
 
-def _animation_filter(layer: dict) -> Optional[str]:
-    data = layer.get("data") or {}
-    preset = data.get("preset", "zoom_in_slow")
-    force = float(data.get("force", 1.0))
-    if preset == "zoom_in_slow":
-        return _zoom_crop(f"(1+{0.05 * force:.4f}*t)")
-    if preset == "zoom_in_punch":
-        return _zoom_crop(f"(1+{0.5 * force:.4f}*(1-exp(-3*t)))")
-    if preset == "zoom_out_slow":
-        return _zoom_crop(f"max(1\\,{1 + 0.3 * force:.3f}-{0.05 * force:.4f}*t)")
-    if preset == "pan_left_right":
-        rate = 0.05 * force
-        return (
-            "crop=w='iw*0.85':h='ih':"
-            f"x='min(iw-out_w\\,iw*{rate:.4f}*t)':y='0'"
-        )
-    if preset == "pan_right_left":
-        rate = 0.05 * force
-        return (
-            "crop=w='iw*0.85':h='ih':"
-            f"x='max(0\\,iw-out_w-iw*{rate:.4f}*t)':y='0'"
-        )
-    if preset == "shake":
-        amp = 8 * force
-        return (
-            "crop=w='iw-20':h='ih-20':"
-            f"x='10+{amp:.2f}*sin(t*30)':y='10+{amp:.2f}*cos(t*30)'"
-        )
-    return None
+@dataclass
+class OverlayInput:
+    """One ffmpeg `-i` input corresponding to a layer's image/gif file."""
+    path: Path
+    is_animated: bool   # GIF → needs -ignore_loop 0
 
 
-def _zoom_crop(z_expr: str) -> str:
-    return (
-        f"crop=w='iw/{z_expr}':h='ih/{z_expr}':"
-        f"x='(iw-iw/{z_expr})/2':y='(ih-ih/{z_expr})/2'"
-    )
-
-
-# ---- video chain (segments + effects + animations + scale) ------------
-
-def _build_video_chains(template: dict, output_w: int, output_h: int) -> list[str]:
-    layers = template.get("layers") or []
-    segments = template.get("source_segments") or []
-
-    chains: list[str] = []
-
-    if segments:
-        seg_labels = []
-        for i, seg in enumerate(segments):
-            in_t = float(seg.get("in_time", 0))
-            out_t = float(seg.get("out_time", 0))
-            label = f"sv{i}"
-            chains.append(
-                f"[0:v]trim=start={in_t}:end={out_t},setpts=PTS-STARTPTS[{label}]"
-            )
-            seg_labels.append(f"[{label}]")
-        if len(segments) == 1:
-            chains.append(f"{seg_labels[0]}null[base]")
-        else:
-            chains.append(
-                f"{''.join(seg_labels)}concat=n={len(segments)}:v=1:a=0[base]"
-            )
-    else:
-        chains.append("[0:v]setpts=PTS-STARTPTS[base]")
-
-    current = "base"
-    for i, layer in enumerate(l for l in layers if l.get("type") == "effect"):
-        flt = _effect_filter(layer)
-        if not flt:
-            continue
-        next_label = f"e{i}"
-        start = float(layer.get("start_time", 0))
-        end = float(layer.get("end_time", 0))
-        chains.append(
-            f"[{current}]{flt}:enable='between(t\\,{start}\\,{end})'[{next_label}]"
-        )
-        current = next_label
-
-    for i, layer in enumerate(l for l in layers if l.get("type") == "animation"):
-        flt = _animation_filter(layer)
-        if not flt:
-            continue
-        next_label = f"a{i}"
-        chains.append(f"[{current}]{flt}[{next_label}]")
-        current = next_label
-
-    chains.append(
-        f"[{current}]scale={output_w}:{output_h}:force_original_aspect_ratio=increase,"
-        f"crop={output_w}:{output_h}[scaled]"
-    )
-    return chains
-
-
-# ---- visual overlays --------------------------------------------------
+# ---- text drawtext ---------------------------------------------------
 
 def _drawtext_filter(
     layer: dict,
     font_path: Path,
+    text: str,
     output_w: int,
     output_h: int,
-    text: str,
 ) -> str:
     data = layer.get("data") or {}
     font_size = max(8, int(float(data.get("font_size_pct", 5)) / 100 * output_h))
@@ -217,18 +117,6 @@ def _drawtext_filter(
     return "drawtext=" + ":".join(opts)
 
 
-def _resolve_text(
-    layer: dict, pools: dict[str, list[str]], pool_index: int
-) -> str:
-    data = layer.get("data") or {}
-    fallback = str(data.get("text", ""))
-    pool = pools.get(layer.get("id"), []) if pools else []
-    valid = [v for v in pool if v.strip()]
-    if not valid:
-        return fallback
-    return valid[pool_index % len(valid)]
-
-
 def _resolve_font_path(
     layer: dict, font_paths: dict[Any, Path]
 ) -> Optional[Path]:
@@ -243,295 +131,209 @@ def _resolve_font_path(
     return next(iter(font_paths.values()), None)
 
 
-# ---- audio chain ------------------------------------------------------
+# ---- public API ------------------------------------------------------
 
-def _build_audio_chains(
-    template: dict, has_overlay_input: bool, overlay_audio_idx: int
-) -> tuple[list[str], Optional[str]]:
-    audio_source = template.get("audio_source") or {}
-    audio_overlay = template.get("audio_overlay") or {}
-    segments = template.get("source_segments") or []
-
-    src_enabled = bool(audio_source.get("enabled", True))
-    src_volume = float(audio_source.get("volume", 1.0))
-    overlay_volume = float(audio_overlay.get("volume", 1.0))
-    overlay_start = float(audio_overlay.get("start_offset", 0.0))
-    overlay_trim = float(audio_overlay.get("trim_in", 0.0))
-
-    chains: list[str] = []
-    src_label: Optional[str] = None
-    overlay_label: Optional[str] = None
-
-    if src_enabled:
-        if segments:
-            seg_a_labels = []
-            for i, seg in enumerate(segments):
-                in_t = float(seg.get("in_time", 0))
-                out_t = float(seg.get("out_time", 0))
-                label = f"sa{i}"
-                chains.append(
-                    f"[0:a]atrim=start={in_t}:end={out_t},asetpts=PTS-STARTPTS[{label}]"
-                )
-                seg_a_labels.append(f"[{label}]")
-            if len(segments) == 1:
-                chains.append(f"{seg_a_labels[0]}anull[base_a]")
-            else:
-                chains.append(
-                    f"{''.join(seg_a_labels)}concat=n={len(segments)}:v=0:a=1[base_a]"
-                )
-        else:
-            chains.append("[0:a]asetpts=PTS-STARTPTS[base_a]")
-        chains.append(f"[base_a]volume={src_volume:.3f}[src_a]")
-        src_label = "src_a"
-
-    if has_overlay_input:
-        chain = (
-            f"[{overlay_audio_idx}:a]atrim=start={overlay_trim:.3f},"
-            "asetpts=PTS-STARTPTS"
-        )
-        chain += f",volume={overlay_volume:.3f}"
-        delay_ms = max(0, int(overlay_start * 1000))
-        if delay_ms > 0:
-            chain += f",adelay={delay_ms}:all=1"
-        chain += "[ovl_a]"
-        chains.append(chain)
-        overlay_label = "ovl_a"
-
-    if src_label and overlay_label:
-        chains.append(
-            f"[{src_label}][{overlay_label}]"
-            "amix=inputs=2:duration=first:dropout_transition=0[mix_a]"
-        )
-        return chains, "mix_a"
-    if src_label:
-        return chains, src_label
-    if overlay_label:
-        return chains, overlay_label
-    return chains, None
-
-
-# ---- public API -------------------------------------------------------
-
-def build_filter_complex(
-    template: dict,
+def build_render_command(
     *,
-    has_overlay_audio: bool = False,
-    overlay_audio_idx: int = 1,
-    visual_inputs: Optional[dict[str, int]] = None,
-    font_paths: Optional[dict[Any, Path]] = None,
-    pools: Optional[dict[str, list[str]]] = None,
-    pool_index: int = 0,
+    clips: list[ClipInput],
+    overlay_inputs: dict[str, OverlayInput],
+    overlay_audio_path: Optional[Path],
+    overlay_audio_config: dict,
+    layers: list[dict],
+    font_paths: dict[Any, Path],
+    output_path: Path,
     output_w: int = OUTPUT_W,
     output_h: int = OUTPUT_H,
-) -> tuple[str, str, Optional[str]]:
-    """Returns (filter_complex_string, video_label, audio_label_or_None)."""
-    visual_inputs = visual_inputs or {}
-    font_paths = font_paths or {}
-    pools = pools or {}
+    fps: int = 30,
+    crf: int = 18,
+    preset: str = "slow",
+) -> list[str]:
+    """Build the full ffmpeg argv for one render.
 
-    chains = _build_video_chains(template, output_w, output_h)
+    `clips` is the full sequence (fixed + already-resolved placeholders).
+    `overlay_inputs` maps layer.id → OverlayInput for each visual layer
+    that needs an additional input file.
+    """
+    inputs: list[str] = []
+    next_idx = 0
+    clip_input_indices: list[int] = []
 
-    layers = template.get("layers") or []
-    overlay_layers = [
-        l for l in layers if l.get("type") in ("text", "image", "gif", "emoji")
-    ]
-    overlay_layers.sort(key=lambda l: l.get("z_index", 0))
+    # 1. Inputs for each clip on the main track
+    for clip in clips:
+        inputs.extend(["-i", str(clip.path)])
+        clip_input_indices.append(next_idx)
+        next_idx += 1
 
-    current = "scaled"
-    for i, layer in enumerate(overlay_layers):
+    overlay_audio_idx = -1
+    if overlay_audio_path:
+        inputs.extend(["-i", str(overlay_audio_path)])
+        overlay_audio_idx = next_idx
+        next_idx += 1
+
+    # 2. Inputs for each visual overlay (image/gif)
+    overlay_layer_input_idx: dict[str, int] = {}
+    for layer_id, ov in overlay_inputs.items():
+        if ov.is_animated:
+            inputs.extend(["-ignore_loop", "0"])
+        inputs.extend(["-i", str(ov.path)])
+        overlay_layer_input_idx[layer_id] = next_idx
+        next_idx += 1
+
+    # 3. Build the filter graph: per-clip trim + scale + concat
+    chains: list[str] = []
+    seg_v_labels: list[str] = []
+    seg_a_labels: list[str] = []
+
+    for i, clip in enumerate(clips):
+        in_idx = clip_input_indices[i]
+        v_label = f"cv{i}"
+        a_label = f"ca{i}"
+
+        # Video sub-chain: trim, reset PTS, scale+crop to output dims
+        v_chain = f"[{in_idx}:v]"
+        if clip.trim_out is not None:
+            v_chain += f"trim=start={clip.trim_in}:end={clip.trim_out},"
+        elif clip.trim_in > 0:
+            v_chain += f"trim=start={clip.trim_in},"
+        v_chain += "setpts=PTS-STARTPTS,"
+        v_chain += (
+            f"scale={output_w}:{output_h}:force_original_aspect_ratio=increase,"
+            f"crop={output_w}:{output_h},"
+        )
+        v_chain += f"fps={fps}"
+        v_chain += f"[{v_label}]"
+        chains.append(v_chain)
+        seg_v_labels.append(f"[{v_label}]")
+
+        # Audio sub-chain (always emit something so concat sees v=1:a=1).
+        # If clip audio is disabled or volume = 0, emit silence of the right length.
+        if clip.audio_enabled and clip.audio_volume > 0:
+            a_chain = f"[{in_idx}:a]"
+            if clip.trim_out is not None:
+                a_chain += f"atrim=start={clip.trim_in}:end={clip.trim_out},"
+            elif clip.trim_in > 0:
+                a_chain += f"atrim=start={clip.trim_in},"
+            a_chain += "asetpts=PTS-STARTPTS,"
+            a_chain += f"volume={clip.audio_volume:.3f}"
+            a_chain += f"[{a_label}]"
+        else:
+            # silent audio matching the clip's video duration
+            dur = (
+                (clip.trim_out - clip.trim_in)
+                if clip.trim_out is not None
+                else 0
+            )
+            # anullsrc for silence — duration matches via concat alignment
+            a_chain = (
+                f"anullsrc=channel_layout=stereo:sample_rate=44100"
+                f":duration={max(0.1, dur):.3f}[{a_label}]"
+            )
+        chains.append(a_chain)
+        seg_a_labels.append(f"[{a_label}]")
+
+    # 4. Concat all clip sub-chains into one main stream
+    n = len(clips)
+    if n == 0:
+        raise ValueError("No clips to render")
+    interleaved = "".join(
+        f"{seg_v_labels[i]}{seg_a_labels[i]}" for i in range(n)
+    )
+    chains.append(
+        f"{interleaved}concat=n={n}:v=1:a=1[main_v][main_a]"
+    )
+
+    # 5. Apply visual overlays (text drawtext + image/gif overlay)
+    sorted_layers = sorted(layers, key=lambda l: l.get("z_index", 0))
+    current_v = "main_v"
+    for i, layer in enumerate(sorted_layers):
         layer_type = layer.get("type")
 
         if layer_type == "text":
             font_path = _resolve_font_path(layer, font_paths)
-            if font_path is None:
-                continue
-            text = _resolve_text(layer, pools, pool_index)
-            if not text:
+            text = str((layer.get("data") or {}).get("text", ""))
+            if not font_path or not text:
                 continue
             next_label = f"tx{i}"
             chains.append(
-                f"[{current}]{_drawtext_filter(layer, font_path, output_w, output_h, text)}[{next_label}]"
+                f"[{current_v}]"
+                f"{_drawtext_filter(layer, font_path, text, output_w, output_h)}"
+                f"[{next_label}]"
             )
-            current = next_label
+            current_v = next_label
             continue
 
-        # image / gif / emoji
-        input_idx = visual_inputs.get(layer.get("id"))
-        if input_idx is None:
-            continue
+        if layer_type in ("image", "gif", "emoji"):
+            input_idx = overlay_layer_input_idx.get(layer.get("id"))
+            if input_idx is None:
+                continue
+            data = layer.get("data") or {}
+            opacity = max(0.0, min(1.0, float(data.get("opacity", 1.0))))
+            rotation = float(data.get("rotation_deg", 0))
 
-        data = layer.get("data") or {}
-        opacity = max(0.0, min(1.0, float(data.get("opacity", 1.0))))
-        rotation = float(data.get("rotation_deg", 0))
+            layer_w = max(1, int(float(layer.get("width_pct", 30)) / 100 * output_w))
+            layer_h = max(1, int(float(layer.get("height_pct", 30)) / 100 * output_h))
+            x_px = int(float(layer.get("x_pct", 25)) / 100 * output_w)
+            y_px = int(float(layer.get("y_pct", 25)) / 100 * output_h)
 
-        layer_w = max(1, int(float(layer.get("width_pct", 30)) / 100 * output_w))
-        layer_h = max(1, int(float(layer.get("height_pct", 30)) / 100 * output_h))
-        x_px = int(float(layer.get("x_pct", 25)) / 100 * output_w)
-        y_px = int(float(layer.get("y_pct", 25)) / 100 * output_h)
-
-        scale_label = f"sc{i}"
-        scale_chain = (
-            f"[{input_idx}:v]scale={layer_w}:{layer_h}:flags=fast_bilinear,"
-            f"format=rgba,colorchannelmixer=aa={opacity:.3f}"
-        )
-        if rotation != 0:
-            rad = rotation * 3.141592653589793 / 180
-            scale_chain += (
-                f",rotate={rad:.4f}:c=none:"
-                f"ow=rotw({rad:.4f}):oh=roth({rad:.4f})"
+            scale_label = f"sc{i}"
+            scale_chain = (
+                f"[{input_idx}:v]scale={layer_w}:{layer_h}:flags=fast_bilinear,"
+                f"format=rgba,colorchannelmixer=aa={opacity:.3f}"
             )
-        scale_chain += f"[{scale_label}]"
-        chains.append(scale_chain)
+            if rotation != 0:
+                rad = rotation * 3.141592653589793 / 180
+                scale_chain += (
+                    f",rotate={rad:.4f}:c=none:"
+                    f"ow=rotw({rad:.4f}):oh=roth({rad:.4f})"
+                )
+            scale_chain += f"[{scale_label}]"
+            chains.append(scale_chain)
 
-        next_label = f"ov{i}"
-        start = float(layer.get("start_time", 0))
-        end = float(layer.get("end_time", 0))
-        chains.append(
-            f"[{current}][{scale_label}]overlay=x={x_px}:y={y_px}:"
-            f"enable='between(t\\,{start}\\,{end})'[{next_label}]"
-        )
-        current = next_label
+            next_label = f"ov{i}"
+            start = float(layer.get("start_time", 0))
+            end = float(layer.get("end_time", 0))
+            chains.append(
+                f"[{current_v}][{scale_label}]overlay=x={x_px}:y={y_px}:"
+                f"enable='between(t\\,{start}\\,{end})'[{next_label}]"
+            )
+            current_v = next_label
 
-    if current != "out":
-        chains.append(f"[{current}]copy[out]")
+    if current_v != "out_v":
+        chains.append(f"[{current_v}]copy[out_v]")
 
-    audio_chains, audio_label = _build_audio_chains(
-        template, has_overlay_audio, overlay_audio_idx
-    )
-    chains.extend(audio_chains)
-
-    return ";".join(chains), "out", audio_label
-
-
-def build_ffmpeg_command(
-    template: dict,
-    source_path: Path,
-    output_path: Path,
-    *,
-    overlay_audio_path: Optional[Path] = None,
-    crf: int = 28,
-    preset: str = "ultrafast",
-) -> list[str]:
-    """Preview command — fast, 720p, no visual overlays."""
-    has_overlay = overlay_audio_path is not None
-    inputs: list[str] = ["-i", str(source_path)]
-    if has_overlay:
-        inputs.extend(["-i", str(overlay_audio_path)])
-
-    fc, video_label, audio_label = build_filter_complex(
-        template,
-        has_overlay_audio=has_overlay,
-        overlay_audio_idx=1,
-    )
-
-    args: list[str] = ["ffmpeg", "-y", *inputs, "-filter_complex", fc]
-    args.extend(["-map", f"[{video_label}]"])
-    if audio_label:
-        args.extend(["-map", f"[{audio_label}]", "-c:a", "aac", "-b:a", "128k"])
-    else:
-        args.append("-an")
-    args.extend(
-        [
-            "-c:v",
-            "libx264",
-            "-preset",
-            preset,
-            "-crf",
-            str(crf),
-            "-pix_fmt",
-            "yuv420p",
-            "-shortest",
-            str(output_path),
-        ]
-    )
-    return args
-
-
-def build_batch_render_command(
-    template: dict,
-    source_path: Path,
-    output_path: Path,
-    *,
-    overlay_audio_path: Optional[Path] = None,
-    asset_paths: dict[int, Path],
-    font_paths: dict[Any, Path],
-    pools: dict[str, list[str]],
-    pool_index: int = 0,
-    output_w: int = 1080,
-    output_h: int = 1920,
-    fps: int = 30,
-    crf: int = 18,
-    preset: str = "slow",
-    audio_bitrate: str = "192k",
-) -> list[str]:
-    """Full-quality batch render. Includes drawtext + image/gif overlays."""
-    layers = template.get("layers") or []
-
-    inputs: list[str] = ["-i", str(source_path)]
-    next_idx = 1
-
-    overlay_audio_idx = next_idx
+    # 6. Audio: optionally mix overlay (background music) into main_a
+    audio_label = "main_a"
     if overlay_audio_path:
-        inputs.extend(["-i", str(overlay_audio_path)])
-        next_idx += 1
+        ov = overlay_audio_config or {}
+        ov_volume = float(ov.get("volume", 1.0))
+        ov_start = float(ov.get("start_offset", 0.0))
+        ov_trim = float(ov.get("trim_in", 0.0))
+        chain = f"[{overlay_audio_idx}:a]atrim=start={ov_trim:.3f},asetpts=PTS-STARTPTS"
+        chain += f",volume={ov_volume:.3f}"
+        delay_ms = max(0, int(ov_start * 1000))
+        if delay_ms > 0:
+            chain += f",adelay={delay_ms}:all=1"
+        chain += "[ovl_a]"
+        chains.append(chain)
+        chains.append(
+            "[main_a][ovl_a]amix=inputs=2:duration=first:dropout_transition=0[mix_a]"
+        )
+        audio_label = "mix_a"
 
-    visual_inputs: dict[str, int] = {}
-    for layer in layers:
-        if layer.get("type") not in ("image", "gif", "emoji"):
-            continue
-        data = layer.get("data") or {}
-        asset_id = data.get("asset_id")
-        path = asset_paths.get(asset_id) if asset_id else None
-        if path is None or not path.is_file():
-            continue
-        if layer["type"] == "gif":
-            inputs.extend(["-ignore_loop", "0"])
-        inputs.extend(["-i", str(path)])
-        visual_inputs[layer["id"]] = next_idx
-        next_idx += 1
-
-    fc, video_label, audio_label = build_filter_complex(
-        template,
-        has_overlay_audio=overlay_audio_path is not None,
-        overlay_audio_idx=overlay_audio_idx,
-        visual_inputs=visual_inputs,
-        font_paths=font_paths,
-        pools=pools,
-        pool_index=pool_index,
-        output_w=output_w,
-        output_h=output_h,
-    )
+    fc = ";".join(chains)
 
     args: list[str] = ["ffmpeg", "-y", *inputs, "-filter_complex", fc]
-    args.extend(["-map", f"[{video_label}]"])
-    if audio_label:
-        args.extend(
-            [
-                "-map",
-                f"[{audio_label}]",
-                "-c:a",
-                "aac",
-                "-b:a",
-                audio_bitrate,
-                "-ac",
-                "2",
-            ]
-        )
-    else:
-        args.append("-an")
-
+    args.extend(["-map", "[out_v]", "-map", f"[{audio_label}]"])
     args.extend(
         [
-            "-c:v",
-            "libx264",
-            "-preset",
-            preset,
-            "-crf",
-            str(crf),
-            "-pix_fmt",
-            "yuv420p",
-            "-r",
-            str(fps),
+            "-c:v", "libx264",
+            "-preset", preset,
+            "-crf", str(crf),
+            "-pix_fmt", "yuv420p",
+            "-r", str(fps),
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-ac", "2",
             "-shortest",
             str(output_path),
         ]
