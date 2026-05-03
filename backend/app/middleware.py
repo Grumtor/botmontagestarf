@@ -6,7 +6,7 @@ from app.auth.dependencies import COOKIE_NAME
 from app.auth.security import decode_access_token
 
 # Routes under /api/* that don't require auth.
-_PUBLIC_API_PREFIXES = ("/api/auth/",)
+_PUBLIC_API_PREFIXES = ("/api/auth/", "/api/_admin/")
 _PUBLIC_API_PATHS = {"/api/health"}
 
 

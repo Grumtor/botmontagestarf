@@ -35,24 +35,19 @@ def _run_migrations() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
-        log.info("Ensuring data directories…")
         ensure_dirs()
     except Exception as e:
         log.exception("ensure_dirs failed: %s", e)
 
     try:
-        log.info("Installing built-in fonts…")
         install_builtin_fonts()
     except Exception as e:
         log.exception("install_builtin_fonts failed: %s", e)
 
-    try:
-        log.info("Running database migrations…")
-        _run_migrations()
-        log.info("Migrations complete.")
-    except Exception as e:
-        log.exception("migrations failed: %s", e)
-
+    # Migrations are no longer run at boot — they hang on Railway when
+    # DATABASE_URL is misconfigured. Run them manually after deploy via
+    # Railway CLI: `railway run --service <name> alembic upgrade head`
+    # or expose them through a dedicated admin endpoint.
     yield
 
 
@@ -82,3 +77,16 @@ app.include_router(jobs_router)
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.post("/api/_admin/migrate")
+def run_migrations_endpoint(secret: str) -> dict:
+    """One-shot migration runner. Pass ?secret=<JWT_SECRET> as query param.
+    Use only at first deploy / after schema changes."""
+    if secret != settings.jwt_secret:
+        return {"ok": False, "detail": "forbidden"}
+    try:
+        _run_migrations()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "detail": str(e)[:500]}
