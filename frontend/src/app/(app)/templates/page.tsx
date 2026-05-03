@@ -17,6 +17,7 @@ import {
   type LanguageFilterValue,
 } from "@/components/templates/language-filter";
 import { NewTemplateDialog } from "@/components/templates/new-template-dialog";
+import { RunRenderDialog } from "@/components/templates/run-render-dialog";
 import { TemplateCard } from "@/components/templates/template-card";
 import { Templates, type Template, type TemplateCreateInput } from "@/lib/api";
 import { useRouter } from "next/navigation";
@@ -30,6 +31,7 @@ export default function TemplatesPage() {
   const [search, setSearch] = useState("");
   const [pendingDelete, setPendingDelete] = useState<Template | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [runRenderTarget, setRunRenderTarget] = useState<Template | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -124,10 +126,16 @@ export default function TemplatesPage() {
               template={t}
               onDuplicate={onDuplicate}
               onDelete={(id) => setPendingDelete(items.find((x) => x.id === id) ?? null)}
+              onRunRender={(template) => setRunRenderTarget(template)}
             />
           ))}
         </div>
       )}
+
+      <RunRenderDialog
+        template={runRenderTarget}
+        onClose={() => setRunRenderTarget(null)}
+      />
 
       <Dialog
         open={pendingDelete !== null}

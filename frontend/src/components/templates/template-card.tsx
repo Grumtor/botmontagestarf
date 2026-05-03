@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Copy, Pencil, Play, Trash2 } from "lucide-react";
+import { Copy, Pencil, Play, Rocket, Trash2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { fr as frLocale } from "date-fns/locale";
 
@@ -14,9 +14,15 @@ type Props = {
   template: Template;
   onDuplicate: (id: number) => void;
   onDelete: (id: number) => void;
+  onRunRender: (template: Template) => void;
 };
 
-export function TemplateCard({ template, onDuplicate, onDelete }: Props) {
+export function TemplateCard({
+  template,
+  onDuplicate,
+  onDelete,
+  onRunRender,
+}: Props) {
   const router = useRouter();
   const [thumbError, setThumbError] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -131,7 +137,7 @@ export function TemplateCard({ template, onDuplicate, onDelete }: Props) {
         </div>
       </div>
 
-      <div className="flex flex-col gap-1 p-3">
+      <div className="flex flex-col gap-2 p-3">
         <div className="truncate text-sm font-medium">{template.name}</div>
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <Badge variant="secondary" className="text-[10px]">
@@ -139,6 +145,17 @@ export function TemplateCard({ template, onDuplicate, onDelete }: Props) {
           </Badge>
           <span>{updated}</span>
         </div>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRunRender(template);
+          }}
+          className="flex items-center justify-center gap-1.5 rounded-md bg-primary px-2 py-1.5 text-xs font-medium text-primary-foreground transition hover:opacity-90"
+        >
+          <Rocket className="h-3 w-3" />
+          Lance un render
+        </button>
       </div>
     </div>
   );
