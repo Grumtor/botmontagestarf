@@ -18,6 +18,8 @@ CMD ["npm", "run", "dev"]
 
 # --- build (prod) -------------------------------------------------------
 FROM base AS builder
+ARG BACKEND_URL
+ENV BACKEND_URL=$BACKEND_URL
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
