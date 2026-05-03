@@ -6,42 +6,55 @@ import { GripVertical, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useEditorStore } from "@/store/editor";
 import { LAYER_COLORS, LAYER_LABELS, LAYER_TYPES } from "@/lib/editor-types";
+import { Templates, type LayerType } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { Asset, LayerType } from "@/lib/api";
-import { AssetPickerDialog } from "./asset-picker-dialog";
 
-type VisualAssetType = "image" | "gif" | "emoji";
-const VISUAL: VisualAssetType[] = ["image", "gif", "emoji"];
-
-function isVisualAsset(t: LayerType): t is VisualAssetType {
-  return (VISUAL as readonly string[]).includes(t);
-}
+const VISUAL_TYPES = new Set<LayerType>(["image", "gif", "emoji"]);
 
 export function EditorSidebar() {
+  const template = useEditorStore((s) => s.template);
   const layers = useEditorStore((s) => s.layers);
   const selectedLayerId = useEditorStore((s) => s.selectedLayerId);
   const setSelected = useEditorStore((s) => s.setSelectedLayerId);
   const reorder = useEditorStore((s) => s.reorderLayers);
   const addLayer = useEditorStore((s) => s.addLayer);
-  const addAssetLayer = useEditorStore((s) => s.addAssetLayer);
+  const patchLayerData = useEditorStore((s) => s.patchLayerData);
 
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
-  const [pickerType, setPickerType] = useState<VisualAssetType | null>(null);
+  const [pendingType, setPendingType] = useState<LayerType | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
+  // Topmost (highest z_index) appears at the top.
   const visualOrder = [...layers].reverse();
 
-  function handlePickType(type: LayerType) {
-    if (isVisualAsset(type)) {
-      setPickerType(type);
+  function handleAdd(type: LayerType) {
+    if (VISUAL_TYPES.has(type)) {
+      // Create the layer first (so we have an id), then prompt for the file.
+      const layer = addLayer(type);
+      setPendingType(type);
+      // Stash the layer id on the input via dataset so we know which to patch.
+      if (fileRef.current) fileRef.current.dataset.layerId = layer.id;
+      fileRef.current?.click();
     } else {
       addLayer(type);
     }
   }
 
-  function handleAssetPicked(asset: Asset, w: number, h: number) {
-    if (pickerType) addAssetLayer(pickerType, asset, w, h);
-    setPickerType(null);
+  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!template) return;
+    const file = e.target.files?.[0];
+    const layerId = e.target.dataset.layerId;
+    e.target.value = "";
+    if (!file || !layerId) return;
+    try {
+      const res = await Templates.uploadOverlay(template.id, file);
+      patchLayerData(layerId, { file_id: res.file_id });
+    } catch (err) {
+      console.error("upload failed", err);
+    } finally {
+      setPendingType(null);
+    }
   }
 
   return (
@@ -108,15 +121,13 @@ export function EditorSidebar() {
         )}
       </div>
 
-      <AddLayerMenu onPick={handlePickType} />
-
-      <AssetPickerDialog
-        open={pickerType !== null}
-        type={pickerType}
-        onPick={handleAssetPicked}
-        onOpenChange={(v) => {
-          if (!v) setPickerType(null);
-        }}
+      <AddLayerMenu onPick={handleAdd} />
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/png,image/jpeg,image/gif"
+        className="hidden"
+        onChange={onPickFile}
       />
     </aside>
   );

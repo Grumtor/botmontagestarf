@@ -55,16 +55,10 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button asChild variant="outline">
+          <Button asChild>
             <Link href="/templates">
               <Plus className="h-4 w-4" />
               New template
-            </Link>
-          </Button>
-          <Button asChild>
-            <Link href="/render/new">
-              <Plus className="h-4 w-4" />
-              New render
             </Link>
           </Button>
         </div>
@@ -73,8 +67,6 @@ export default function DashboardPage() {
       <Card>
         <CardContent className="flex flex-wrap items-center gap-6 p-6 text-sm">
           <Stat label="Templates" value={stats?.template_count ?? 0} />
-          <span className="text-muted-foreground">·</span>
-          <Stat label="Sources" value={stats?.source_count ?? 0} />
           <span className="text-muted-foreground">·</span>
           <Stat label="Rendus totaux" value={stats?.render_count ?? 0} />
         </CardContent>

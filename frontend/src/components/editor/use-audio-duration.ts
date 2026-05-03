@@ -2,39 +2,40 @@
 
 import { useEffect, useState } from "react";
 
-const cache = new Map<number, number>();
+const cache = new Map<string, number>();
 
 /**
- * Resolve an audio asset's duration by loading just its metadata.
+ * Resolve an audio file's duration by loading just its metadata.
  * Memoised module-wide so repeated mounts don't re-fetch.
+ * Pass a full URL.
  */
-export function useAudioDuration(assetId: number | null | undefined): number | null {
+export function useAudioDuration(url: string | null | undefined): number | null {
   const [duration, setDuration] = useState<number | null>(
-    assetId != null ? (cache.get(assetId) ?? null) : null,
+    url ? (cache.get(url) ?? null) : null,
   );
 
   useEffect(() => {
-    if (assetId == null) {
+    if (!url) {
       setDuration(null);
       return;
     }
-    const cached = cache.get(assetId);
+    const cached = cache.get(url);
     if (cached != null) {
       setDuration(cached);
       return;
     }
     const audio = new Audio();
     audio.preload = "metadata";
-    audio.src = `/api/files/asset/${assetId}`;
+    audio.src = url;
     function onMeta() {
       if (Number.isFinite(audio.duration)) {
-        cache.set(assetId!, audio.duration);
+        cache.set(url!, audio.duration);
         setDuration(audio.duration);
       }
     }
     audio.addEventListener("loadedmetadata", onMeta);
     return () => audio.removeEventListener("loadedmetadata", onMeta);
-  }, [assetId]);
+  }, [url]);
 
   return duration;
 }

@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { TemplateLanguage, TemplateCreateInput } from "@/lib/api";
+import type { TemplateCreateInput, TemplateLanguage } from "@/lib/api";
 
 type Props = {
   onCreate: (data: TemplateCreateInput) => Promise<void>;
@@ -31,14 +31,12 @@ export function NewTemplateDialog({ onCreate }: Props) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [language, setLanguage] = useState<TemplateLanguage>("US");
-  const [duration, setDuration] = useState(5);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function reset() {
     setName("");
     setLanguage("US");
-    setDuration(5);
     setError(null);
   }
 
@@ -51,11 +49,7 @@ export function NewTemplateDialog({ onCreate }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      await onCreate({
-        name: name.trim(),
-        language,
-        duration_sec: duration,
-      });
+      await onCreate({ name: name.trim(), language });
       setOpen(false);
       reset();
     } catch (err) {
@@ -82,7 +76,9 @@ export function NewTemplateDialog({ onCreate }: Props) {
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Nouveau template</DialogTitle>
-          <DialogDescription>Crée un nouveau template de reel.</DialogDescription>
+          <DialogDescription>
+            Tu construiras le contenu (clips + overlays) ensuite dans l&apos;éditeur.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="space-y-1.5">
@@ -95,34 +91,20 @@ export function NewTemplateDialog({ onCreate }: Props) {
               required
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Langue</label>
-              <Select
-                value={language}
-                onValueChange={(v) => setLanguage(v as TemplateLanguage)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="US">🇺🇸 US</SelectItem>
-                  <SelectItem value="FR">🇫🇷 FR</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Durée (s)</label>
-              <Input
-                type="number"
-                min={1}
-                max={90}
-                step={0.5}
-                value={duration}
-                onChange={(e) => setDuration(Number(e.target.value))}
-                required
-              />
-            </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Langue</label>
+            <Select
+              value={language}
+              onValueChange={(v) => setLanguage(v as TemplateLanguage)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="US">🇺🇸 US</SelectItem>
+                <SelectItem value="FR">🇫🇷 FR</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>

@@ -97,11 +97,10 @@ def gather_render_inputs(
             path = _resolve_token(token)
             if path is None:
                 raise ValueError(f"Upload token {token!r} not found in /data/temp")
+            target_dur = float(clip.get("duration_sec", 3.0))
             resolved_clips.append(
                 ClipInput(
                     path=path,
-                    # User videos are taken whole by default; the editor can
-                    # override trim_in/trim_out per placeholder later.
                     trim_in=float(clip.get("trim_in", 0)),
                     trim_out=(
                         float(clip["trim_out"])
@@ -110,6 +109,7 @@ def gather_render_inputs(
                     ),
                     audio_enabled=audio_enabled,
                     audio_volume=audio_volume,
+                    target_duration=target_dur,
                 )
             )
         else:

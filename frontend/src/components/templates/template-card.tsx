@@ -88,12 +88,9 @@ export function TemplateCard({ template, onDuplicate, onDelete }: Props) {
       <div className="flex flex-col gap-1 p-3">
         <div className="truncate text-sm font-medium">{template.name}</div>
         <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <Badge variant="secondary" className="text-[10px]">
-              {langLabel}
-            </Badge>
-            <span>{template.duration_sec.toFixed(1)}s</span>
-          </div>
+          <Badge variant="secondary" className="text-[10px]">
+            {langLabel}
+          </Badge>
           <span>{updated}</span>
         </div>
       </div>

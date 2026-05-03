@@ -4,16 +4,18 @@ import { Pause, Play, Square } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useEditorStore } from "@/store/editor";
-import { clamp, formatTime } from "@/lib/editor-types";
+import { clamp, formatTime, totalDuration } from "@/lib/editor-types";
 
 export function PlaybackControls() {
   const isPlaying = useEditorStore((s) => s.isPlaying);
   const setIsPlaying = useEditorStore((s) => s.setIsPlaying);
   const currentTime = useEditorStore((s) => s.currentTime);
   const setCurrentTime = useEditorStore((s) => s.setCurrentTime);
-  const duration = useEditorStore((s) => s.template?.duration_sec ?? 0);
+  const clips = useEditorStore((s) => s.clips);
+  const duration = Math.max(0, totalDuration(clips));
 
   function togglePlay() {
+    if (duration === 0) return;
     if (currentTime >= duration) setCurrentTime(0);
     setIsPlaying(!isPlaying);
   }
@@ -35,7 +37,7 @@ export function PlaybackControls() {
       <input
         type="range"
         min={0}
-        max={duration}
+        max={Math.max(duration, 0.01)}
         step={0.01}
         value={currentTime}
         onChange={(e) => {
@@ -43,6 +45,7 @@ export function PlaybackControls() {
           setCurrentTime(v);
         }}
         className="flex-1 accent-primary"
+        disabled={duration === 0}
       />
 
       <div className="font-mono text-xs tabular-nums text-muted-foreground">

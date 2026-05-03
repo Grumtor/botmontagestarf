@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Fonts, Pools, Templates } from "@/lib/api";
+import { Fonts, Templates } from "@/lib/api";
 import { useEditorStore } from "@/store/editor";
+import { totalDuration } from "@/lib/editor-types";
 import { EditorTopbar } from "@/components/editor/editor-topbar";
 import { EditorSidebar } from "@/components/editor/editor-sidebar";
 import { EditorCanvas } from "@/components/editor/editor-canvas";
@@ -13,23 +14,20 @@ import { EditorTimeline } from "@/components/editor/editor-timeline";
 export function EditorView({ id }: { id: number }) {
   const loadTemplate = useEditorStore((s) => s.loadTemplate);
   const loadFonts = useEditorStore((s) => s.loadFonts);
-  const loadPools = useEditorStore((s) => s.loadPools);
-  const splitAtCurrentTime = useEditorStore((s) => s.splitAtCurrentTime);
   const template = useEditorStore((s) => s.template);
   const isPlaying = useEditorStore((s) => s.isPlaying);
   const setCurrentTime = useEditorStore((s) => s.setCurrentTime);
   const setIsPlaying = useEditorStore((s) => s.setIsPlaying);
-  const duration = useEditorStore((s) => s.template?.duration_sec ?? 0);
+  const clips = useEditorStore((s) => s.clips);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([Templates.get(id), Fonts.list(), Pools.list(id)])
-      .then(([t, fonts, pools]) => {
+    Promise.all([Templates.get(id), Fonts.list()])
+      .then(([t, fonts]) => {
         if (cancelled) return;
         loadTemplate(t);
         loadFonts(fonts);
-        loadPools(pools);
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Erreur");
@@ -37,29 +35,13 @@ export function EditorView({ id }: { id: number }) {
     return () => {
       cancelled = true;
     };
-  }, [id, loadTemplate, loadFonts, loadPools]);
+  }, [id, loadTemplate, loadFonts]);
 
-  // Keyboard shortcuts. S = split at current time. Skip if the user is
-  // typing in an input / textarea / contenteditable.
+  // RAF playback loop
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      const target = e.target as HTMLElement | null;
-      if (target) {
-        const tag = target.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
-      }
-      if (e.key === "s" || e.key === "S") {
-        e.preventDefault();
-        splitAtCurrentTime();
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [splitAtCurrentTime]);
-
-  // Playback loop: requestAnimationFrame drives currentTime while playing.
-  useEffect(() => {
-    if (!isPlaying || duration <= 0) return;
+    if (!isPlaying) return;
+    const duration = totalDuration(clips);
+    if (duration <= 0) return;
     let last = performance.now();
     let raf = 0;
     const step = (now: number) => {
@@ -76,7 +58,7 @@ export function EditorView({ id }: { id: number }) {
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [isPlaying, duration, setCurrentTime, setIsPlaying]);
+  }, [isPlaying, clips, setCurrentTime, setIsPlaying]);
 
   if (error) {
     return (

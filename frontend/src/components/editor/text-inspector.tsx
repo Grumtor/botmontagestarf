@@ -11,7 +11,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { fontFamily } from "@/lib/editor-types";
 import { parseTextData, type FontId, type Layer, type TextStyle } from "@/lib/api";
 import { useEditorStore } from "@/store/editor";
@@ -26,24 +25,7 @@ export function TextInspector({ layer }: Props) {
 
   return (
     <div className="space-y-4">
-      <Tabs defaultValue="style">
-        <TabsList className="w-full">
-          <TabsTrigger value="style" className="flex-1">
-            Style
-          </TabsTrigger>
-          <TabsTrigger value="pool" className="flex-1">
-            Pool
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="style" className="space-y-4">
-          <StyleTab layer={layer} onPatchData={(p) => patchData(layer.id, p)} />
-        </TabsContent>
-
-        <TabsContent value="pool">
-          <PoolTab layerId={layer.id} />
-        </TabsContent>
-      </Tabs>
+      <StyleTab layer={layer} onPatchData={(p) => patchData(layer.id, p)} />
 
       <div className="space-y-2 border-t border-border pt-4">
         <FieldRow>
@@ -75,8 +57,6 @@ export function TextInspector({ layer }: Props) {
     </div>
   );
 }
-
-// ---- Style tab --------------------------------------------------------
 
 function StyleTab({
   layer,
@@ -289,35 +269,6 @@ function StyleTab({
   );
 }
 
-// ---- Pool tab ---------------------------------------------------------
-
-function PoolTab({ layerId }: { layerId: string }) {
-  const items = useEditorStore((s) => s.pools[layerId] ?? []);
-  const setPool = useEditorStore((s) => s.setPool);
-  const validCount = items.filter((l) => l.trim().length > 0).length;
-
-  return (
-    <div className="space-y-3 pt-2">
-      <textarea
-        value={items.join("\n")}
-        onChange={(e) => setPool(layerId, e.target.value.split("\n"))}
-        rows={10}
-        placeholder="Une variante par ligne…"
-        className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      />
-      <div className="text-xs text-muted-foreground">
-        {validCount} variante{validCount > 1 ? "s" : ""}
-      </div>
-      <p className="rounded-md border border-border bg-background/50 p-2 text-[11px] leading-relaxed text-muted-foreground">
-        Les variantes seront utilisées en cycle pour les rendus batch (variante i
-        pour la i-ème vidéo générée).
-      </p>
-    </div>
-  );
-}
-
-// ---- helpers ----------------------------------------------------------
-
 function parseFontIdValue(v: string): FontId {
   return /^\d+$/.test(v) ? Number(v) : v;
 }
@@ -390,9 +341,7 @@ function SliderField({
   onChange: (v: number) => void;
 }) {
   return (
-    <Field
-      label={`${label}: ${value.toFixed(2)}${suffix ?? ""}`}
-    >
+    <Field label={`${label}: ${value.toFixed(2)}${suffix ?? ""}`}>
       <input
         type="range"
         min={min}
@@ -456,9 +405,7 @@ function ToggleBtn({
       onClick={onClick}
       className={cn(
         "h-8 w-8 rounded-md border text-xs transition",
-        active
-          ? "border-primary bg-accent"
-          : "border-border hover:bg-accent/50",
+        active ? "border-primary bg-accent" : "border-border hover:bg-accent/50",
         bold && "font-bold",
         italic && "italic",
       )}

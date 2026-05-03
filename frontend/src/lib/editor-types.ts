@@ -1,92 +1,36 @@
 import type {
-  AnimationPreset,
-  EffectType,
+  Clip,
+  FixedClip,
   FontId,
   LayerType,
-  SourceSegment,
-  TransitionType,
+  PlaceholderClip,
 } from "@/lib/api";
 
-export const EFFECT_TYPES: { type: EffectType; label: string }[] = [
-  { type: "saturation", label: "Saturation" },
-  { type: "brightness", label: "Brightness" },
-  { type: "contrast", label: "Contrast" },
-  { type: "vignette", label: "Vignette" },
-  { type: "blur", label: "Blur" },
+// ===== layers ========================================================
+
+export const LAYER_TYPES: { type: LayerType; label: string }[] = [
+  { type: "text", label: "Texte" },
+  { type: "image", label: "Image" },
+  { type: "gif", label: "GIF" },
+  { type: "emoji", label: "Emoji" },
 ];
 
-export const ANIMATION_PRESETS: { preset: AnimationPreset; label: string }[] = [
-  { preset: "zoom_in_slow", label: "Zoom in slow" },
-  { preset: "zoom_in_punch", label: "Zoom in punch" },
-  { preset: "zoom_out_slow", label: "Zoom out slow" },
-  { preset: "pan_left_right", label: "Pan ←→" },
-  { preset: "pan_right_left", label: "Pan →←" },
-  { preset: "shake", label: "Shake" },
-];
+export const LAYER_LABELS: Record<LayerType, string> = LAYER_TYPES.reduce(
+  (acc, x) => ({ ...acc, [x.type]: x.label }),
+  {} as Record<LayerType, string>,
+);
 
-export function effectForceRange(type: EffectType): { min: number; max: number } {
-  if (type === "vignette" || type === "blur") return { min: 0, max: 100 };
-  return { min: -100, max: 100 };
-}
-
-// ---- source segments helpers ----------------------------------------
-
-export const TRANSITION_TYPES: { type: TransitionType; label: string }[] = [
-  { type: "cut", label: "Cut" },
-  { type: "fade", label: "Fade" },
-  { type: "slide-left", label: "Slide ←" },
-  { type: "slide-right", label: "Slide →" },
-  { type: "zoomblur", label: "Zoom blur" },
-  { type: "glitch", label: "Glitch" },
-];
-
-export function segmentDuration(seg: SourceSegment): number {
-  return Math.max(0, seg.out_time - seg.in_time);
-}
-
-export function segmentOutputStarts(segments: SourceSegment[]): number[] {
-  const starts: number[] = [];
-  let cursor = 0;
-  for (const seg of segments) {
-    starts.push(cursor);
-    cursor += segmentDuration(seg);
-  }
-  return starts;
-}
-
-export function totalSegmentDuration(segments: SourceSegment[]): number {
-  return segments.reduce((s, seg) => s + segmentDuration(seg), 0);
-}
-
-/** Map an output time to (segmentIndex, sourceTime). Returns null past end. */
-export function outputToSource(
-  outputTime: number,
-  segments: SourceSegment[],
-): { segmentIndex: number; sourceTime: number } | null {
-  let cursor = 0;
-  for (let i = 0; i < segments.length; i++) {
-    const dur = segmentDuration(segments[i]);
-    const end = cursor + dur;
-    const last = i === segments.length - 1;
-    if (outputTime < end || (last && outputTime <= end)) {
-      return {
-        segmentIndex: i,
-        sourceTime: segments[i].in_time + (outputTime - cursor),
-      };
-    }
-    cursor = end;
-  }
-  return null;
-}
-
-export function fontFamily(fontId: FontId): string {
-  return `bm-font-${fontId}`;
-}
+export const LAYER_COLORS: Record<LayerType, string> = {
+  text: "rgba(59, 130, 246, 0.55)",
+  image: "rgba(34, 197, 94, 0.55)",
+  gif: "rgba(168, 85, 247, 0.55)",
+  emoji: "rgba(234, 179, 8, 0.55)",
+};
 
 export function defaultLayerData(type: LayerType): Record<string, unknown> {
   if (type === "text") {
     return {
-      text: "Hello",
+      text: "Texte",
       font_id: "inter",
       font_size_pct: 5,
       color: "#FFFFFF",
@@ -103,40 +47,60 @@ export function defaultLayerData(type: LayerType): Record<string, unknown> {
       italic: false,
     };
   }
-  if (type === "effect") {
-    return { type: "saturation", force: 0 };
-  }
-  if (type === "animation") {
-    return { preset: "zoom_in_slow", force: 1.0 };
-  }
-  return {};
+  // image / gif / emoji default — file_id null until user uploads
+  return { file_id: null, rotation_deg: 0, opacity: 1, ratio_locked: true };
 }
 
-export const LAYER_TYPES: { type: LayerType; label: string }[] = [
-  { type: "text", label: "Texte" },
-  { type: "image", label: "Image" },
-  { type: "gif", label: "GIF" },
-  { type: "emoji", label: "Emoji" },
-  { type: "audio", label: "Audio overlay" },
-  { type: "effect", label: "Effet" },
-  { type: "animation", label: "Animation" },
-];
+// ===== fonts =========================================================
 
-export const LAYER_LABELS: Record<LayerType, string> = LAYER_TYPES.reduce(
-  (acc, x) => ({ ...acc, [x.type]: x.label }),
-  {} as Record<LayerType, string>,
-);
+export function fontFamily(fontId: FontId): string {
+  return `bm-font-${fontId}`;
+}
 
-// rgba so the underlying canvas/video shows through
-export const LAYER_COLORS: Record<LayerType, string> = {
-  text: "rgba(59, 130, 246, 0.55)",
-  image: "rgba(34, 197, 94, 0.55)",
-  gif: "rgba(168, 85, 247, 0.55)",
-  emoji: "rgba(234, 179, 8, 0.55)",
-  audio: "rgba(244, 114, 182, 0.55)",
-  effect: "rgba(249, 115, 22, 0.55)",
-  animation: "rgba(239, 68, 68, 0.55)",
-};
+// ===== clips =========================================================
+
+export function clipDuration(clip: Clip): number {
+  if (clip.type === "fixed") {
+    if (clip.trim_out != null) return Math.max(0, clip.trim_out - clip.trim_in);
+    return Math.max(0, (clip.source_duration_sec ?? 0) - clip.trim_in);
+  }
+  return Math.max(0, clip.duration_sec);
+}
+
+export function totalDuration(clips: Clip[]): number {
+  return clips.reduce((s, c) => s + clipDuration(c), 0);
+}
+
+export function clipStartTimes(clips: Clip[]): number[] {
+  const out: number[] = [];
+  let cursor = 0;
+  for (const c of clips) {
+    out.push(cursor);
+    cursor += clipDuration(c);
+  }
+  return out;
+}
+
+/** Map an output time to (clipIndex, localTime within that clip).
+ * Returns null if past the end. */
+export function timelineToClip(
+  outputTime: number,
+  clips: Clip[],
+): { clipIndex: number; localTime: number } | null {
+  let cursor = 0;
+  for (let i = 0; i < clips.length; i++) {
+    const dur = clipDuration(clips[i]);
+    const end = cursor + dur;
+    const last = i === clips.length - 1;
+    if (outputTime < end || (last && outputTime <= end)) {
+      return { clipIndex: i, localTime: outputTime - cursor };
+    }
+    cursor = end;
+  }
+  return null;
+}
+
+// ===== misc ==========================================================
 
 export function clamp(v: number, lo: number, hi: number): number {
   return Math.min(Math.max(v, lo), hi);
@@ -147,4 +111,36 @@ export function formatTime(seconds: number): string {
   const m = Math.floor(safe / 60);
   const s = Math.floor(safe % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+export function makeFixedClip(
+  fileId: string,
+  durationSec: number | null,
+  width: number | null,
+  height: number | null,
+): FixedClip {
+  return {
+    id: crypto.randomUUID(),
+    type: "fixed",
+    file_id: fileId,
+    source_duration_sec: durationSec,
+    source_width: width,
+    source_height: height,
+    trim_in: 0,
+    trim_out: durationSec,
+    audio_enabled: true,
+    audio_volume: 1.0,
+  };
+}
+
+export function makePlaceholderClip(durationSec: number = 3.0): PlaceholderClip {
+  return {
+    id: crypto.randomUUID(),
+    type: "placeholder",
+    duration_sec: durationSec,
+    trim_in: 0,
+    trim_out: null,
+    audio_enabled: true,
+    audio_volume: 1.0,
+  };
 }

@@ -1,37 +1,36 @@
 "use client";
 
-import { useState } from "react";
-import { Image as ImageIcon, Lock, Trash2, Unlock } from "lucide-react";
+import { useRef } from "react";
+import { ImageUp, Lock, Trash2, Unlock } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useEditorStore } from "@/store/editor";
 import { LAYER_LABELS } from "@/lib/editor-types";
-import { parseAssetData, type Asset, type Layer } from "@/lib/api";
+import { Templates, parseAssetData, type Layer } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { AssetPickerDialog } from "./asset-picker-dialog";
 
 type Props = { layer: Layer };
 
 export function AssetLayerInspector({ layer }: Props) {
+  const template = useEditorStore((s) => s.template);
   const patchLayer = useEditorStore((s) => s.patchLayer);
   const patchLayerData = useEditorStore((s) => s.patchLayerData);
   const deleteLayer = useEditorStore((s) => s.deleteLayer);
   const data = parseAssetData(layer.data);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const visualType = layer.type as "image" | "gif" | "emoji";
-
-  function onAssetPicked(asset: Asset, w: number, h: number) {
-    // Update asset_id and (optionally) the layer's height to match the new
-    // asset's natural ratio if ratio is locked.
-    patchLayerData(layer.id, { asset_id: asset.id });
-    if (data.ratio_locked && w > 0 && h > 0) {
-      const canvasAspect = 9 / 16;
-      const newHeight = layer.width_pct * canvasAspect * (h / w);
-      patchLayer(layer.id, { height_pct: newHeight });
+  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!template) return;
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const res = await Templates.uploadOverlay(template.id, file);
+      patchLayerData(layer.id, { file_id: res.file_id });
+    } catch (err) {
+      console.error(err);
     }
-    setPickerOpen(false);
   }
 
   return (
@@ -45,11 +44,18 @@ export function AssetLayerInspector({ layer }: Props) {
         variant="outline"
         size="sm"
         className="w-full"
-        onClick={() => setPickerOpen(true)}
+        onClick={() => inputRef.current?.click()}
       >
-        <ImageIcon className="h-4 w-4" />
-        Changer asset
+        <ImageUp className="h-4 w-4" />
+        {data.file_id ? "Remplacer le fichier" : "Importer un fichier"}
       </Button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/gif"
+        className="hidden"
+        onChange={onPickFile}
+      />
 
       <Section title="Apparence">
         <SliderField
@@ -148,13 +154,6 @@ export function AssetLayerInspector({ layer }: Props) {
         <Trash2 className="h-4 w-4" />
         Supprimer le calque
       </Button>
-
-      <AssetPickerDialog
-        open={pickerOpen}
-        type={visualType}
-        onPick={onAssetPicked}
-        onOpenChange={setPickerOpen}
-      />
     </div>
   );
 }

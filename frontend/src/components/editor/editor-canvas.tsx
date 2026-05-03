@@ -7,22 +7,19 @@ import {
   LAYER_COLORS,
   LAYER_LABELS,
   clamp,
-  outputToSource,
-  segmentOutputStarts,
-  segmentDuration,
+  clipDuration,
+  clipStartTimes,
+  timelineToClip,
 } from "@/lib/editor-types";
 import { cn } from "@/lib/utils";
 import {
   parseAssetData,
   parseTextData,
   type Layer,
-  type SourceSegment,
 } from "@/lib/api";
 import { FontLoader } from "./font-loader";
 import { TextLayerContent } from "./text-layer";
 import { AssetLayerContent } from "./asset-layer";
-
-const VISUAL_ASSET_TYPES = new Set(["image", "gif", "emoji"]);
 
 type Handle = "tl" | "tm" | "tr" | "ml" | "mr" | "bl" | "bm" | "br";
 
@@ -41,16 +38,12 @@ export function EditorCanvas() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  const template = useEditorStore((s) => s.template);
+  const clips = useEditorStore((s) => s.clips);
   const layers = useEditorStore((s) => s.layers);
   const currentTime = useEditorStore((s) => s.currentTime);
   const isPlaying = useEditorStore((s) => s.isPlaying);
-  const previewSourceId = useEditorStore((s) => s.previewSourceId);
-  const segments = useEditorStore((s) => s.sourceSegments);
-  const audioSource = useEditorStore((s) => s.audioSource);
-  const audioOverlay = useEditorStore((s) => s.audioOverlay);
   const setSelected = useEditorStore((s) => s.setSelectedLayerId);
-
-  const overlayAudioRef = useRef<HTMLAudioElement>(null);
 
   const visibleLayers = useMemo(
     () =>
@@ -60,98 +53,52 @@ export function EditorCanvas() {
     [layers, currentTime],
   );
 
-  // ---- video element ------------------------------------------------
-  // During playback we let the video play naturally so its audio runs;
-  // we only seek to the right source time at the start of playback or on
-  // scrub. (Light desync vs. timeline RAF is tolerated per spec.)
+  const active = useMemo(
+    () => timelineToClip(currentTime, clips),
+    [currentTime, clips],
+  );
+  const activeClip = active ? clips[active.clipIndex] : null;
+  const activeIsFixed = activeClip?.type === "fixed";
 
-  // Volume / mute mirror audio_source. HTML <video>.volume is clamped to 1
-  // by the browser; values >1 in our model are honoured by ffmpeg only.
+  const activeFileUrl =
+    template && activeIsFixed && activeClip?.file_id
+      ? `/api/files/template_clip/${template.id}/${activeClip.file_id}`
+      : null;
+
+  // When src changes, reload video. When playing, ensure local seek + play.
   useEffect(() => {
     const v = videoRef.current;
-    if (!v) return;
-    v.muted = !audioSource.enabled;
-    v.volume = audioSource.enabled ? Math.min(1, audioSource.volume) : 0;
-  }, [audioSource]);
-
-  // Play/pause + seek to current source time on transitions.
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (isPlaying) {
-      const map = outputToSource(currentTime, segments);
-      const target = map?.sourceTime ?? currentTime;
+    if (!v || !activeFileUrl || !activeClip || activeClip.type !== "fixed") return;
+    const sourceTime = activeClip.trim_in + (active?.localTime ?? 0);
+    if (Math.abs(v.currentTime - sourceTime) > 0.2) {
       try {
-        v.currentTime = target;
+        v.currentTime = sourceTime;
       } catch {
-        /* not loaded */
+        /* not loaded yet */
       }
+    }
+  }, [active?.localTime, activeClip, activeFileUrl]);
+
+  // Sync play/pause with isPlaying
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (isPlaying && activeIsFixed) {
       v.play().catch(() => {});
     } else {
       v.pause();
     }
-    // Only react to play/pause + previewSourceId changes, not currentTime
-    // (otherwise we'd seek every frame and stutter).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying, previewSourceId]);
+  }, [isPlaying, activeIsFixed]);
 
-  // Scrub: when paused and currentTime changes externally, seek the video.
+  // Apply per-clip audio config
   useEffect(() => {
-    if (isPlaying) return;
     const v = videoRef.current;
-    if (!v) return;
-    const map = outputToSource(currentTime, segments);
-    const target = map?.sourceTime ?? currentTime;
-    if (Math.abs(v.currentTime - target) > 0.05) {
-      try {
-        v.currentTime = target;
-      } catch {
-        /* not loaded */
-      }
-    }
-  }, [currentTime, isPlaying, segments]);
-
-  // ---- overlay audio element ----------------------------------------
-  useEffect(() => {
-    const a = overlayAudioRef.current;
-    if (!a) return;
-    a.muted = false;
-    a.volume = Math.min(1, Math.max(0, audioOverlay.volume));
-  }, [audioOverlay.volume]);
-
-  useEffect(() => {
-    const a = overlayAudioRef.current;
-    if (!a || audioOverlay.asset_id == null) return;
-
-    const overlayActive = currentTime >= audioOverlay.start_offset;
-    if (!isPlaying || !overlayActive) {
-      if (!a.paused) a.pause();
-      return;
-    }
-    const fileTime =
-      audioOverlay.trim_in + Math.max(0, currentTime - audioOverlay.start_offset);
-    if (Math.abs(a.currentTime - fileTime) > 0.5) {
-      try {
-        a.currentTime = fileTime;
-      } catch {
-        /* not loaded */
-      }
-    }
-    if (a.paused) a.play().catch(() => {});
-  }, [
-    isPlaying,
-    currentTime,
-    audioOverlay.asset_id,
-    audioOverlay.start_offset,
-    audioOverlay.trim_in,
-  ]);
-
-  // CSS fade approximation around segment boundaries (for non-cut transitions).
-  // Real ffmpeg-rendered effects ship in a later prompt.
-  const transitionOpacity = useMemo(
-    () => boundaryOpacity(currentTime, segments),
-    [currentTime, segments],
-  );
+    if (!v || !activeClip || activeClip.type !== "fixed") return;
+    v.muted = !activeClip.audio_enabled;
+    v.volume = activeClip.audio_enabled
+      ? Math.min(1, activeClip.audio_volume)
+      : 0;
+  }, [activeClip]);
 
   return (
     <div
@@ -169,114 +116,86 @@ export function EditorCanvas() {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {previewSourceId !== null && (
-          <div
-            className="absolute inset-0"
-            style={{ opacity: transitionOpacity }}
-          >
-            <video
-              ref={videoRef}
-              key={previewSourceId}
-              src={`/api/files/source/${previewSourceId}`}
-              className="absolute inset-0 h-full w-full object-cover"
-              playsInline
-              preload="auto"
-            />
+        {/* Active clip rendering */}
+        {activeIsFixed && activeFileUrl && (
+          <video
+            ref={videoRef}
+            key={activeFileUrl}
+            src={activeFileUrl}
+            className="absolute inset-0 h-full w-full object-cover"
+            playsInline
+            preload="auto"
+          />
+        )}
+
+        {activeClip?.type === "placeholder" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-yellow-700/20 text-center text-xs text-yellow-200">
+            <div>
+              <div className="text-lg font-semibold">📷 Placeholder</div>
+              <div className="opacity-80">
+                {activeClip.duration_sec.toFixed(1)}s
+              </div>
+              <div className="mt-1 text-[10px] opacity-60">
+                Vidéo utilisateur insérée ici au render
+              </div>
+            </div>
           </div>
         )}
 
-        {visibleLayers.map((layer) => (
-          <CanvasLayer key={layer.id} layer={layer} canvasRef={canvasRef} />
-        ))}
+        {!activeClip && (
+          <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+            Aucun clip — ajoute-en depuis la timeline.
+          </div>
+        )}
+
+        {/* Layers (text/image/gif/emoji) */}
+        {template &&
+          visibleLayers.map((layer) => (
+            <CanvasLayer
+              key={layer.id}
+              layer={layer}
+              templateId={template.id}
+              canvasRef={canvasRef}
+            />
+          ))}
 
         <div className="pointer-events-none absolute right-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
           360×640
         </div>
-
-        <ActiveEffectsBadge layers={visibleLayers} />
-
-        {audioOverlay.asset_id != null && (
-          <audio
-            ref={overlayAudioRef}
-            key={audioOverlay.asset_id}
-            src={`/api/files/asset/${audioOverlay.asset_id}`}
-            preload="auto"
-          />
-        )}
       </div>
-    </div>
-  );
-}
-
-function ActiveEffectsBadge({ layers }: { layers: Layer[] }) {
-  const active = layers.filter(
-    (l) => l.type === "effect" || l.type === "animation",
-  );
-  if (active.length === 0) return null;
-  return (
-    <div className="pointer-events-none absolute bottom-1 left-1 flex max-w-[calc(100%-8px)] flex-wrap gap-1">
-      {active.map((l) => {
-        const data = (l.data ?? {}) as Record<string, unknown>;
-        const label =
-          l.type === "effect"
-            ? String(data.type ?? "effect")
-            : String(data.preset ?? "animation");
-        const force = Number(data.force ?? 1);
-        return (
-          <span
-            key={l.id}
-            className="rounded bg-black/70 px-2 py-0.5 text-[10px] font-medium text-white"
-          >
-            🎬 {label} ×{force.toFixed(1)}
-          </span>
-        );
-      })}
     </div>
   );
 }
 
 function CanvasLayer({
   layer,
+  templateId,
   canvasRef,
 }: {
   layer: Layer;
+  templateId: number;
   canvasRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const selectedLayerId = useEditorStore((s) => s.selectedLayerId);
   const setSelected = useEditorStore((s) => s.setSelectedLayerId);
   const patchLayer = useEditorStore((s) => s.patchLayer);
-  const pool = useEditorStore((s) =>
-    layer.type === "text" ? (s.pools[layer.id] ?? []) : null,
-  );
   const selected = layer.id === selectedLayerId;
 
   const isText = layer.type === "text";
-  const isVisualAsset = VISUAL_ASSET_TYPES.has(layer.type);
-  const isFallbackRect = !isText && !isVisualAsset;
-
   const textData = isText ? parseTextData(layer.data) : null;
-  const assetData = isVisualAsset ? parseAssetData(layer.data) : null;
-
-  const previewText =
-    isText && textData
-      ? (pool ?? []).find((s) => s.trim().length > 0) ?? textData.text
-      : null;
-
-  const ratioLocked =
-    isVisualAsset && assetData?.ratio_locked === true;
+  const assetData = !isText ? parseAssetData(layer.data) : null;
+  const ratioLocked = assetData?.ratio_locked === true;
 
   function startDrag(e: React.MouseEvent) {
     if (!canvasRef.current) return;
     e.preventDefault();
     e.stopPropagation();
     setSelected(layer.id);
-
     const rect = canvasRef.current.getBoundingClientRect();
     const startX = e.clientX;
     const startY = e.clientY;
     const startXPct = layer.x_pct;
     const startYPct = layer.y_pct;
-
     function onMove(ev: MouseEvent) {
       const dxPct = ((ev.clientX - startX) / rect.width) * 100;
       const dyPct = ((ev.clientY - startY) / rect.height) * 100;
@@ -298,7 +217,6 @@ function CanvasLayer({
     e.preventDefault();
     e.stopPropagation();
     setSelected(layer.id);
-
     const rect = canvasRef.current.getBoundingClientRect();
     const startX = e.clientX;
     const startY = e.clientY;
@@ -320,12 +238,10 @@ function CanvasLayer({
     function onMove(ev: MouseEvent) {
       const dxPx = ev.clientX - startX;
       const dyPx = ev.clientY - startY;
-
       let newWpx = initWpx;
       let newHpx = initHpx;
       let dxLeftPx = 0;
       let dyTopPx = 0;
-
       if (right) newWpx = initWpx + dxPx;
       if (left) {
         newWpx = initWpx - dxPx;
@@ -336,9 +252,7 @@ function CanvasLayer({
         newHpx = initHpx - dyPx;
         dyTopPx = dyPx;
       }
-
       if (ratioLocked && isCorner) {
-        // Pick the dominant axis by absolute pixel delta to drive both dims.
         const wAbs = Math.abs(newWpx - initWpx);
         const hAbs = Math.abs(newHpx - initHpx);
         if (wAbs >= hAbs) {
@@ -349,7 +263,6 @@ function CanvasLayer({
           if (left) dxLeftPx = initWpx - newWpx;
         }
       }
-
       const minPx = 8;
       if (newWpx < minPx) {
         const adj = minPx - newWpx;
@@ -361,14 +274,12 @@ function CanvasLayer({
         newHpx = minPx;
         if (top) dyTopPx -= adj;
       }
-
       const newW = (newWpx / rect.width) * 100;
       const newH = (newHpx / rect.height) * 100;
       let newX = init.x;
       let newY = init.y;
       if (left) newX = init.x + (dxLeftPx / rect.width) * 100;
       if (top) newY = init.y + (dyTopPx / rect.height) * 100;
-
       patchLayer(layer.id, {
         x_pct: newX,
         y_pct: newY,
@@ -389,7 +300,6 @@ function CanvasLayer({
       onMouseDown={startDrag}
       className={cn(
         "absolute cursor-move",
-        isFallbackRect && "flex items-center justify-center text-[10px] font-medium text-white",
         selected && "outline outline-2 outline-dashed outline-white/80",
       )}
       style={{
@@ -397,19 +307,15 @@ function CanvasLayer({
         top: `${layer.y_pct}%`,
         width: `${layer.width_pct}%`,
         height: `${layer.height_pct}%`,
-        backgroundColor:
-          isText || isVisualAsset ? "transparent" : LAYER_COLORS[layer.type],
+        backgroundColor: "transparent",
         zIndex: layer.z_index + 1,
       }}
     >
       {isText && textData && (
-        <TextLayerContent data={textData} text={previewText ?? ""} />
+        <TextLayerContent data={textData} text={textData.text} />
       )}
-      {isVisualAsset && assetData && <AssetLayerContent data={assetData} />}
-      {isFallbackRect && (
-        <span className="pointer-events-none drop-shadow">
-          {LAYER_LABELS[layer.type]}
-        </span>
+      {!isText && assetData && (
+        <AssetLayerContent data={assetData} templateId={templateId} />
       )}
 
       {selected &&
@@ -426,27 +332,4 @@ function CanvasLayer({
         ))}
     </div>
   );
-}
-
-/**
- * Returns a 0..1 opacity multiplier for the source video that simulates the
- * configured transition around segment boundaries:
- *   - cut: always 1 (instant)
- *   - other types: linear fade-out / fade-in across `transition.duration`
- *     centred on the boundary (CSS approximation; ffmpeg does the real work).
- */
-function boundaryOpacity(currentTime: number, segments: SourceSegment[]): number {
-  if (segments.length < 2) return 1;
-  const starts = segmentOutputStarts(segments);
-  for (let i = 0; i < segments.length - 1; i++) {
-    const t = segments[i].transition_to_next;
-    if (t.type === "cut") continue;
-    const boundary = starts[i] + segmentDuration(segments[i]);
-    const half = t.duration / 2;
-    const dist = Math.abs(currentTime - boundary);
-    if (dist < half) {
-      return Math.max(0, dist / half);
-    }
-  }
-  return 1;
 }

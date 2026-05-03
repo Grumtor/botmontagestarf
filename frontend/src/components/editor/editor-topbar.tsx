@@ -2,26 +2,24 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Eye, Film, Save } from "lucide-react";
+import { ArrowLeft, Eye, Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useEditorStore } from "@/store/editor";
 import { Render } from "@/lib/api";
-import { PreviewSourcePicker } from "./preview-source-picker";
+import { useEditorStore } from "@/store/editor";
 import { RenderPreviewDialog } from "./render-preview-dialog";
 
 export function EditorTopbar() {
   const router = useRouter();
   const template = useEditorStore((s) => s.template);
+  const clips = useEditorStore((s) => s.clips);
   const patchTemplate = useEditorStore((s) => s.patchTemplate);
   const setLanguage = useEditorStore((s) => s.setLanguage);
   const saveNow = useEditorStore((s) => s.saveNow);
   const saving = useEditorStore((s) => s.saving);
   const saveError = useEditorStore((s) => s.saveError);
-  const previewSourceId = useEditorStore((s) => s.previewSourceId);
-  const saveNowAction = saveNow;
-  const [pickerOpen, setPickerOpen] = useState(false);
+
   const [renderOpen, setRenderOpen] = useState(false);
   const [renderLoading, setRenderLoading] = useState(false);
   const [renderError, setRenderError] = useState<string | null>(null);
@@ -35,20 +33,28 @@ export function EditorTopbar() {
 
   async function onRenderPreview() {
     if (!template) return;
-    if (previewSourceId === null) {
-      setRenderError("Choisis une source de preview avant de rendre.");
+    const placeholderClips = clips.filter((c) => c.type === "placeholder");
+    if (placeholderClips.length > 0) {
+      setRenderError(
+        `Le template a ${placeholderClips.length} placeholder(s). ` +
+          "L'aperçu du template est plus utile une fois le batch lancé.",
+      );
       setRenderOpen(true);
       return;
     }
-    // Flush pending edits so the render uses the freshest template state.
-    await saveNowAction();
+    if (clips.length === 0) {
+      setRenderError("Le template est vide. Ajoute au moins un clip.");
+      setRenderOpen(true);
+      return;
+    }
+    await saveNow();
     if (renderUrl) URL.revokeObjectURL(renderUrl);
     setRenderUrl(null);
     setRenderError(null);
     setRenderLoading(true);
     setRenderOpen(true);
     try {
-      const blob = await Render.preview(template.id, previewSourceId);
+      const blob = await Render.preview(template.id, []);
       setRenderUrl(URL.createObjectURL(blob));
     } catch (err) {
       setRenderError(err instanceof Error ? err.message : "Échec du rendu");
@@ -88,22 +94,6 @@ export function EditorTopbar() {
         >
           {template.language === "FR" ? "🇫🇷 FR" : "🇺🇸 US"}
         </button>
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <span>Durée</span>
-          <Input
-            type="number"
-            min={1}
-            max={90}
-            step={0.5}
-            value={template.duration_sec}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              if (Number.isFinite(v) && v >= 1) patchTemplate({ duration_sec: v });
-            }}
-            className="h-8 w-20 text-sm"
-          />
-          <span>s</span>
-        </div>
       </div>
 
       <div className="flex items-center gap-2">
@@ -116,14 +106,6 @@ export function EditorTopbar() {
             "Sauvegardé"
           )}
         </span>
-        <Button
-          variant={previewSourceId ? "secondary" : "outline"}
-          size="sm"
-          onClick={() => setPickerOpen(true)}
-        >
-          <Film className="h-4 w-4" />
-          {previewSourceId ? "Source choisie" : "Source de preview"}
-        </Button>
         <Button
           variant="outline"
           size="sm"
@@ -139,14 +121,11 @@ export function EditorTopbar() {
         </Button>
       </div>
 
-      <PreviewSourcePicker open={pickerOpen} onOpenChange={setPickerOpen} />
       <RenderPreviewDialog
         open={renderOpen}
         onOpenChange={(v) => {
           setRenderOpen(v);
-          if (!v) {
-            setRenderError(null);
-          }
+          if (!v) setRenderError(null);
         }}
         blobUrl={renderUrl}
         loading={renderLoading}

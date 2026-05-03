@@ -3,34 +3,41 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useEditorStore } from "@/store/editor";
-import { LAYER_COLORS, LAYER_LABELS, clamp, formatTime } from "@/lib/editor-types";
+import {
+  LAYER_COLORS,
+  LAYER_LABELS,
+  clamp,
+  formatTime,
+  totalDuration,
+} from "@/lib/editor-types";
 import { cn } from "@/lib/utils";
 import type { Layer } from "@/lib/api";
-import { SourceSegmentsLane } from "./source-segments-track";
-import { OverlayAudioLane, SourceAudioLane } from "./audio-tracks";
+import { ClipTrack, ClipTrackHeader } from "./clip-track";
+import { OverlayAudioLane } from "./audio-tracks";
 
-const TIMELINE_HEIGHT = 200;
+const TIMELINE_HEIGHT = 240;
+const HEADER_HEIGHT = 30;
 const RULER_HEIGHT = 24;
 const TRACK_HEIGHT = 28;
 const TRACK_GAP = 4;
-const LABEL_WIDTH = 110;
-const MIN_PX_PER_SEC = 30;
+const LABEL_WIDTH = 120;
+const MIN_PX_PER_SEC = 20;
 const MAX_PX_PER_SEC = 400;
 const MIN_LAYER_DURATION = 0.1;
 
 export function EditorTimeline() {
   const layers = useEditorStore((s) => s.layers);
-  const duration = useEditorStore((s) => s.template?.duration_sec ?? 0);
+  const clips = useEditorStore((s) => s.clips);
   const currentTime = useEditorStore((s) => s.currentTime);
   const setCurrentTime = useEditorStore((s) => s.setCurrentTime);
   const selectedLayerId = useEditorStore((s) => s.selectedLayerId);
   const setSelected = useEditorStore((s) => s.setSelectedLayerId);
   const patchLayer = useEditorStore((s) => s.patchLayer);
 
+  const duration = Math.max(1, totalDuration(clips));
   const [pxPerSec, setPxPerSec] = useState(60);
   const scrollerRef = useRef<HTMLDivElement>(null);
 
-  // Cmd/Ctrl + wheel = zoom (need non-passive listener to preventDefault).
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
@@ -45,11 +52,10 @@ export function EditorTimeline() {
   }, []);
 
   const tracksWidth = Math.max(duration * pxPerSec, 200);
-  // Reverse so highest z-index appears at top of the layer tracks (closer to canvas).
   const layerTracks = [...layers].reverse();
-  // 3 fixed lanes: video source, source audio, overlay audio.
+  // 2 fixed lanes: clips + audio overlay
   const totalTracksHeight =
-    (layerTracks.length + 3) * (TRACK_HEIGHT + TRACK_GAP);
+    (layerTracks.length + 2) * (TRACK_HEIGHT + TRACK_GAP);
 
   const scrubFromX = useCallback(
     (clientX: number, container: HTMLDivElement) => {
@@ -78,97 +84,92 @@ export function EditorTimeline() {
 
   return (
     <div
-      className="flex shrink-0 border-t border-border bg-card"
+      className="flex shrink-0 flex-col border-t border-border bg-card"
       style={{ height: TIMELINE_HEIGHT }}
     >
-      {/* Track labels (sticky left) */}
-      <div
-        className="flex shrink-0 flex-col border-r border-border bg-background text-xs"
-        style={{ width: LABEL_WIDTH }}
-      >
+      <ClipTrackHeader />
+      <div className="flex flex-1 min-h-0">
+        {/* Track labels (sticky left) */}
         <div
-          className="flex items-center justify-between border-b border-border px-2 text-[10px] uppercase tracking-wider text-muted-foreground"
-          style={{ height: RULER_HEIGHT }}
+          className="flex shrink-0 flex-col border-r border-border bg-background text-xs"
+          style={{ width: LABEL_WIDTH }}
         >
-          <span>Pistes</span>
-          <span className="font-mono">{Math.round(pxPerSec)} px/s</span>
-        </div>
-        <TrackLabel label="Vidéo source" muted />
-        <TrackLabel label="Source audio" muted />
-        <TrackLabel label="Audio overlay" muted />
-        {layerTracks.map((l) => (
-          <TrackLabel
-            key={l.id}
-            label={`${LAYER_LABELS[l.type]} #${l.z_index + 1}`}
-            color={LAYER_COLORS[l.type]}
-          />
-        ))}
-      </div>
-
-      {/* Scrollable timeline body */}
-      <div ref={scrollerRef} className="relative flex-1 overflow-x-auto overflow-y-hidden">
-        <div
-          className="relative"
-          style={{
-            width: tracksWidth + 16,
-            height: RULER_HEIGHT + totalTracksHeight,
-          }}
-        >
-          {/* Ruler */}
           <div
-            onMouseDown={onRulerDown}
-            className="sticky top-0 z-10 cursor-pointer select-none border-b border-border bg-background"
-            style={{ height: RULER_HEIGHT, width: tracksWidth }}
+            className="flex items-center justify-between border-b border-border px-2 text-[10px] uppercase tracking-wider text-muted-foreground"
+            style={{ height: RULER_HEIGHT }}
           >
-            <Ruler duration={duration} pxPerSec={pxPerSec} />
+            <span>Pistes</span>
+            <span className="font-mono">{Math.round(pxPerSec)} px/s</span>
           </div>
+          <TrackLabel label="Vidéo" />
+          <TrackLabel label="Audio" muted />
+          {layerTracks.map((l) => (
+            <TrackLabel
+              key={l.id}
+              label={`${LAYER_LABELS[l.type]} #${l.z_index + 1}`}
+              color={LAYER_COLORS[l.type]}
+            />
+          ))}
+        </div>
 
-          {/* Track lanes */}
-          <div style={{ paddingTop: TRACK_GAP }}>
-            <div style={{ marginBottom: TRACK_GAP }}>
-              <SourceSegmentsLane
-                pxPerSec={pxPerSec}
-                width={tracksWidth}
-                height={TRACK_HEIGHT}
-              />
-            </div>
-            <div style={{ marginBottom: TRACK_GAP }}>
-              <SourceAudioLane
-                pxPerSec={pxPerSec}
-                width={tracksWidth}
-                height={TRACK_HEIGHT}
-              />
-            </div>
-            <div style={{ marginBottom: TRACK_GAP }}>
-              <OverlayAudioLane
-                pxPerSec={pxPerSec}
-                width={tracksWidth}
-                height={TRACK_HEIGHT}
-              />
-            </div>
-            {layerTracks.map((layer) => (
-              <LayerLane
-                key={layer.id}
-                layer={layer}
-                duration={duration}
-                pxPerSec={pxPerSec}
-                width={tracksWidth}
-                selected={layer.id === selectedLayerId}
-                onSelect={() => setSelected(layer.id)}
-                onPatch={(p) => patchLayer(layer.id, p)}
-              />
-            ))}
-          </div>
-
-          {/* Playhead */}
+        {/* Scrollable timeline body */}
+        <div
+          ref={scrollerRef}
+          className="relative flex-1 overflow-x-auto overflow-y-hidden"
+        >
           <div
-            className="pointer-events-none absolute top-0 z-20 w-px bg-primary"
+            className="relative"
             style={{
-              left: currentTime * pxPerSec,
+              width: tracksWidth + 16,
               height: RULER_HEIGHT + totalTracksHeight,
             }}
           >
-            <div className="absolute -left-[5px] -top-[2px] h-0 w-0 border-x-[5px] border-t-[6px] border-x-transparent border-t-primary" />
+            <div
+              onMouseDown={onRulerDown}
+              className="sticky top-0 z-10 cursor-pointer select-none border-b border-border bg-background"
+              style={{ height: RULER_HEIGHT, width: tracksWidth }}
+            >
+              <Ruler duration={duration} pxPerSec={pxPerSec} />
+            </div>
+
+            <div style={{ paddingTop: TRACK_GAP }}>
+              <div style={{ marginBottom: TRACK_GAP }}>
+                <ClipTrack
+                  pxPerSec={pxPerSec}
+                  width={tracksWidth}
+                  height={TRACK_HEIGHT}
+                />
+              </div>
+              <div style={{ marginBottom: TRACK_GAP }}>
+                <OverlayAudioLane
+                  pxPerSec={pxPerSec}
+                  width={tracksWidth}
+                  height={TRACK_HEIGHT}
+                />
+              </div>
+              {layerTracks.map((layer) => (
+                <LayerLane
+                  key={layer.id}
+                  layer={layer}
+                  duration={duration}
+                  pxPerSec={pxPerSec}
+                  width={tracksWidth}
+                  selected={layer.id === selectedLayerId}
+                  onSelect={() => setSelected(layer.id)}
+                  onPatch={(p) => patchLayer(layer.id, p)}
+                />
+              ))}
+            </div>
+
+            <div
+              className="pointer-events-none absolute top-0 z-20 w-px bg-primary"
+              style={{
+                left: currentTime * pxPerSec,
+                height: RULER_HEIGHT + totalTracksHeight,
+              }}
+            >
+              <div className="absolute -left-[5px] -top-[2px] h-0 w-0 border-x-[5px] border-t-[6px] border-x-transparent border-t-primary" />
+            </div>
           </div>
         </div>
       </div>
@@ -201,19 +202,6 @@ function TrackLabel({
         />
       )}
       <span className="truncate">{label}</span>
-    </div>
-  );
-}
-
-function PlaceholderLane({ width, label }: { width: number; label: string }) {
-  return (
-    <div
-      className="relative border-b border-border bg-background/40"
-      style={{ height: TRACK_HEIGHT, width, marginBottom: TRACK_GAP }}
-    >
-      <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
-        ({label} — à venir)
-      </span>
     </div>
   );
 }
@@ -272,7 +260,6 @@ function LayerLane({
     e.preventDefault();
     e.stopPropagation();
     onSelect();
-
     const startX = e.clientX;
     const startStart = layer.start_time;
     const startEnd = layer.end_time;
@@ -281,7 +268,7 @@ function LayerLane({
       const dt = (ev.clientX - startX) / pxPerSec;
       if (mode === "move") {
         const len = startEnd - startStart;
-        const newStart = clamp(startStart + dt, 0, duration - len);
+        const newStart = clamp(startStart + dt, 0, Math.max(0, duration - len));
         onPatch({ start_time: newStart, end_time: newStart + len });
       } else if (mode === "resize-left") {
         const newStart = clamp(

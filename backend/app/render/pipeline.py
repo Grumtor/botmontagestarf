@@ -52,6 +52,10 @@ class ClipInput:
     trim_out: Optional[float]   # None = take everything from trim_in to end
     audio_enabled: bool
     audio_volume: float
+    # If set, force the clip to exactly this duration: trim if longer,
+    # pad with last frame (and silence) if shorter. Used by placeholders
+    # whose duration is fixed by the template, regardless of the source.
+    target_duration: Optional[float] = None
 
 
 @dataclass
@@ -189,7 +193,7 @@ def build_render_command(
         v_label = f"cv{i}"
         a_label = f"ca{i}"
 
-        # Video sub-chain: trim, reset PTS, scale+crop to output dims
+        # Video sub-chain: trim, scale+crop, optionally force exact duration.
         v_chain = f"[{in_idx}:v]"
         if clip.trim_out is not None:
             v_chain += f"trim=start={clip.trim_in}:end={clip.trim_out},"
@@ -200,13 +204,21 @@ def build_render_command(
             f"scale={output_w}:{output_h}:force_original_aspect_ratio=increase,"
             f"crop={output_w}:{output_h},"
         )
+        if clip.target_duration is not None:
+            # Pad with cloned last frame for as long as needed, then trim to
+            # exactly target_duration. tpad's stop_duration is "extra after
+            # the source", so we use a generous value and let trim cap us.
+            td = max(0.1, clip.target_duration)
+            v_chain += (
+                f"tpad=stop_mode=clone:stop_duration={td:.3f},"
+                f"trim=duration={td:.3f},setpts=PTS-STARTPTS,"
+            )
         v_chain += f"fps={fps}"
         v_chain += f"[{v_label}]"
         chains.append(v_chain)
         seg_v_labels.append(f"[{v_label}]")
 
         # Audio sub-chain (always emit something so concat sees v=1:a=1).
-        # If clip audio is disabled or volume = 0, emit silence of the right length.
         if clip.audio_enabled and clip.audio_volume > 0:
             a_chain = f"[{in_idx}:a]"
             if clip.trim_out is not None:
@@ -215,15 +227,21 @@ def build_render_command(
                 a_chain += f"atrim=start={clip.trim_in},"
             a_chain += "asetpts=PTS-STARTPTS,"
             a_chain += f"volume={clip.audio_volume:.3f}"
+            if clip.target_duration is not None:
+                td = max(0.1, clip.target_duration)
+                a_chain += (
+                    f",apad=whole_dur={td:.3f},"
+                    f"atrim=duration={td:.3f},asetpts=PTS-STARTPTS"
+                )
             a_chain += f"[{a_label}]"
         else:
-            # silent audio matching the clip's video duration
-            dur = (
-                (clip.trim_out - clip.trim_in)
-                if clip.trim_out is not None
-                else 0
-            )
-            # anullsrc for silence — duration matches via concat alignment
+            # Silent audio matching the clip's expected duration.
+            if clip.target_duration is not None:
+                dur = clip.target_duration
+            elif clip.trim_out is not None:
+                dur = clip.trim_out - clip.trim_in
+            else:
+                dur = 0
             a_chain = (
                 f"anullsrc=channel_layout=stereo:sample_rate=44100"
                 f":duration={max(0.1, dur):.3f}[{a_label}]"
