@@ -34,13 +34,25 @@ def _run_migrations() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    log.info("Ensuring data directories…")
-    ensure_dirs()
-    log.info("Installing built-in fonts…")
-    install_builtin_fonts()
-    log.info("Running database migrations…")
-    _run_migrations()
-    log.info("Migrations complete.")
+    try:
+        log.info("Ensuring data directories…")
+        ensure_dirs()
+    except Exception as e:
+        log.exception("ensure_dirs failed: %s", e)
+
+    try:
+        log.info("Installing built-in fonts…")
+        install_builtin_fonts()
+    except Exception as e:
+        log.exception("install_builtin_fonts failed: %s", e)
+
+    try:
+        log.info("Running database migrations…")
+        _run_migrations()
+        log.info("Migrations complete.")
+    except Exception as e:
+        log.exception("migrations failed: %s", e)
+
     yield
 
 
