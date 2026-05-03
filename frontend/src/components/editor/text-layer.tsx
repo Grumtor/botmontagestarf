@@ -3,12 +3,17 @@
 import type { CSSProperties } from "react";
 import { fontFamily } from "@/lib/editor-types";
 import type { TextLayerData } from "@/lib/api";
+import { parseTextWithEmojis } from "@/lib/apple-emoji";
 
 /**
  * Renders the text content of a text layer inside the layer's bounding box.
  * The bounding box itself is positioned by the parent CanvasLayer wrapper
  * (in % of the canvas). Font size uses `cqh` so it scales with the canvas
  * height — requires the canvas root to have `container-type: size`.
+ *
+ * Emojis embedded in the text are rendered as Apple emoji PNGs from the
+ * emoji-datasource-apple jsdelivr CDN. Plain text segments use the configured
+ * font.
  */
 export function TextLayerContent({
   data,
@@ -64,7 +69,7 @@ export function TextLayerContent({
               WebkitBoxDecorationBreak: "clone",
             }}
           >
-            {text}
+            <RenderedText text={text} />
           </span>
         </div>
       </div>
@@ -96,7 +101,7 @@ export function TextLayerContent({
             paintOrder: "stroke fill",
           }}
         >
-          {text}
+          <RenderedText text={text} />
         </div>
       </div>
     );
@@ -104,7 +109,45 @@ export function TextLayerContent({
 
   return (
     <div style={containerStyle}>
-      <div style={baseTextStyle}>{text}</div>
+      <div style={baseTextStyle}>
+        <RenderedText text={text} />
+      </div>
     </div>
+  );
+}
+
+/**
+ * Splits the input string into text + Apple emoji <img> spans.
+ * Emoji images are sized at 1em so they match the surrounding font-size.
+ */
+function RenderedText({ text }: { text: string }) {
+  const segments = parseTextWithEmojis(text);
+  if (segments.length === 0) return null;
+  return (
+    <>
+      {segments.map((seg, i) =>
+        seg.kind === "text" ? (
+          <span key={i}>{seg.value}</span>
+        ) : (
+          <img
+            key={i}
+            src={seg.url}
+            alt={seg.native}
+            draggable={false}
+            style={{
+              height: "1em",
+              width: "1em",
+              display: "inline-block",
+              verticalAlign: "-0.15em",
+              objectFit: "contain",
+              // Strip any inherited stroke/shadow effects so the PNG glyph
+              // stays crisp inside stroke-styled text.
+              WebkitTextStroke: 0,
+              textShadow: "none",
+            }}
+          />
+        ),
+      )}
+    </>
   );
 }

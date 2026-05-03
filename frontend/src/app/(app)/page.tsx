@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Download, Plus, Rocket } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
@@ -9,21 +9,11 @@ import { fr as frLocale } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { RunRenderDialog } from "@/components/templates/run-render-dialog";
-import {
   Dashboard,
   Jobs,
-  Templates,
   type DashboardStats,
   type JobStatus,
   type JobSummary,
-  type Template,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -38,18 +28,14 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [runRenderTarget, setRunRenderTarget] = useState<Template | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([Dashboard.stats(), Jobs.list(), Templates.list()])
-      .then(([s, j, t]) => {
+    Promise.all([Dashboard.stats(), Jobs.list()])
+      .then(([s, j]) => {
         if (cancelled) return;
         setStats(s);
         setJobs(j.slice(0, 8));
-        setTemplates(t);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -69,11 +55,13 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setPickerOpen(true)}>
-            <Rocket className="h-4 w-4" />
-            Lancer un render
-          </Button>
           <Button asChild>
+            <Link href="/render/new">
+              <Rocket className="h-4 w-4" />
+              Lancer un render
+            </Link>
+          </Button>
+          <Button asChild variant="outline">
             <Link href="/templates">
               <Plus className="h-4 w-4" />
               New template
@@ -89,59 +77,6 @@ export default function DashboardPage() {
           <Stat label="Rendus totaux" value={stats?.render_count ?? 0} />
         </CardContent>
       </Card>
-
-      {/* Template picker for "Lancer un render" */}
-      <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Choisis un template</DialogTitle>
-            <DialogDescription>
-              Lance un render à partir d&apos;un de tes templates.
-            </DialogDescription>
-          </DialogHeader>
-          {templates.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Aucun template encore — crée-en un d&apos;abord.
-            </p>
-          ) : (
-            <div className="grid max-h-[480px] grid-cols-3 gap-3 overflow-y-auto pr-1">
-              {templates.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => {
-                    setPickerOpen(false);
-                    setRunRenderTarget(t);
-                  }}
-                  className="group flex flex-col overflow-hidden rounded-lg border border-border bg-card text-left transition hover:border-ring"
-                >
-                  <div className="relative aspect-[9/16] w-full bg-black">
-                    <img
-                      src={`/api/files/template_thumb/${t.id}`}
-                      alt=""
-                      className="absolute inset-0 h-full w-full object-cover"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = "none";
-                      }}
-                    />
-                  </div>
-                  <div className="p-2 text-xs">
-                    <div className="truncate font-medium">{t.name}</div>
-                    <div className="text-muted-foreground">
-                      {t.language === "FR" ? "🇫🇷 FR" : "🇺🇸 US"}
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <RunRenderDialog
-        template={runRenderTarget}
-        onClose={() => setRunRenderTarget(null)}
-      />
 
       <Card>
         <CardHeader>

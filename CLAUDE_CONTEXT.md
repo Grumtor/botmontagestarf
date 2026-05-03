@@ -2,7 +2,7 @@
 
 > Document interne pour Claude. À lire en cas de perte de contexte. À mettre à jour à chaque prompt/changement majeur.
 >
-> **Last updated**: après Phase 4 (cleanup + image clips on main track + magnetic snap + dashboard quick render + UX agent report)
+> **Last updated**: après Phase 5 (wizard 3 étapes `/render/new` + Apple emojis via emoji-mart)
 > **Next planned**: appliquer les recommandations du rapport UX agent (Top 5 problèmes + polish) — voir section 13
 
 ---
@@ -109,7 +109,8 @@ L'app a vécu un **pivot majeur entre la Phase 1 originelle et la Phase 1 du mod
 │
 └── frontend/
     ├── Dockerfile                     ← multi-stage Next 15 standalone, ARG BACKEND_URL
-    ├── package.json                   ← next 15.1.11+, react 19, zod, jose, zustand, date-fns, lucide
+    ├── package.json                   ← next 15.1.11+, react 19, zod, jose, zustand, date-fns, lucide, @emoji-mart/data, @emoji-mart/react, emoji-mart
+    ├── .npmrc                         ← legacy-peer-deps=true (emoji-mart peer-deps lag)
     ├── next.config.ts                 ← rewrites /api/* → BACKEND_URL (build-time !)
     ├── tailwind.config.ts             ← thème dark par défaut, vars HSL CSS
     └── src/
@@ -121,6 +122,7 @@ L'app a vécu un **pivot majeur entre la Phase 1 originelle et la Phase 1 du mod
         │   ├── (app)/                 ← group protégé avec sidebar+header
         │   │   ├── layout.tsx         ← Sidebar + Header + main
         │   │   ├── page.tsx           ← Dashboard (stats + 8 derniers jobs)
+        │   │   ├── render/new/page.tsx ← Wizard 3 étapes Upload→Templates→Confirm (Phase 5)
         │   │   ├── templates/page.tsx ← grille templates avec preview videos
         │   │   ├── jobs/page.tsx      ← liste jobs avec polling 2s
         │   │   └── jobs/[id]/page.tsx ← détail job avec previews et downloads
@@ -129,7 +131,7 @@ L'app a vécu un **pivot majeur entre la Phase 1 originelle et la Phase 1 du mod
         │       └── editor-view.tsx    ← topbar+sidebar+canvas+inspector+timeline avec resize
         ├── components/
         │   ├── app/
-        │   │   ├── sidebar.tsx        ← Dashboard / Templates / Jobs (3 entrées seulement)
+        │   │   ├── sidebar.tsx        ← Dashboard / Nouveau render / Templates / Jobs
         │   │   └── header.tsx         ← logout button
         │   ├── ui/                    ← shadcn (button, input, card, dialog, sheet, tabs, tooltip, badge, progress, toast, select)
         │   ├── library/
@@ -157,10 +159,13 @@ L'app a vécu un **pivot majeur entre la Phase 1 originelle et la Phase 1 du mod
         │       ├── playback-controls.tsx      ← play/pause/stop + scrubber
         │       ├── font-loader.tsx            ← @font-face injection pour toutes les fonts du store
         │       ├── render-preview-dialog.tsx  ← modal avec video player du preview MP4
-        │       ├── emoji-picker.tsx           ← popover emoji curated 80
+        │       ├── emoji-picker.tsx           ← popover emoji-mart Apple set (Phase 5)
         │       └── use-audio-duration.ts      ← hook pour récupérer durée d'un audio par URL
+        ├── components/templates/
+        │       └── run-render-dialog.tsx      ← dialog single-template (par-card) — wizard `/render/new` couvre le multi-template
         ├── lib/
         │   ├── api.ts                 ← TOUS les schemas zod + fetch helpers + Templates/Render/Jobs/Dashboard/Fonts clients
+        │   ├── apple-emoji.ts         ← parseTextWithEmojis (Intl.Segmenter + \p{Extended_Pictographic}) + URLs CDN emoji-datasource-apple (Phase 5)
         │   ├── editor-types.ts        ← LAYER_TYPES, LAYER_COLORS, fontFamily, clipDuration, totalDuration, timelineToClip
         │   ├── upload.ts              ← XHR-based file upload with progress
         │   └── utils.ts               ← cn() classnames helper
@@ -438,6 +443,7 @@ L'app a vécu un **pivot majeur entre la Phase 1 originelle et la Phase 1 du mod
 | **Pivot Phase 2.6** | mai 2026 | Détails : emoji picker 80 emojis, timeline resizable (drag handle, persisted localStorage), template card play overlay → video preview, backend cache preview MP4 dans `/data/templates/{id}/preview.mp4`, `_placeholder_preview.mp4` 30s noir pour previews avec placeholders non remplis, fonts-noto-color-emoji ajouté au Dockerfile. |
 | **Phase 3** | mai 2026 | Dialog "Lance un render" sur chaque card template (`run-render-dialog.tsx`). Une dropzone par placeholder, multi-files. Upload via `Render.uploadUserVideo` (token). Rule de pairing : N vidéos par placeholder, même N pour tous → N reels. Pour 0 placeholder = 1 reel. Spoofing toggle avec MODELS / COUNTRIES / LANGUAGES / dateWindow. POST `/api/render/batch` puis `router.push("/jobs/{id}")`. Bouton "Lance un render" violet primaire en bas de chaque card. State `runRenderTarget` dans templates/page.tsx. |
 | **Phase 4** | mai 2026 | (a) Cleanup : drop `store/index.ts`, `dropzone.tsx`, `upload-list.tsx` (orphelins). (b) `/data/temp` cleanup auto au boot (fichiers > 24h). (c) **Image clips on main track** : nouveau ClipType `image`, schéma zod `ImageClipSchema`, store `addImageClip`, helper `makeImageClip`, action bar bouton "+ Image" (icône `ImagePlus`), upload accepte PNG/JPG, pipeline `is_image: True` → ffmpeg input `-loop 1 -framerate FPS -t duration -i path`, audio toujours silent pour image. Color `bg-emerald-700/80` dans clip-track. Drop overlay "+ Image" button (les images vont sur la track principale ; GIF/Emoji restent en overlay). (d) **Magnetic snap** : layer blocks snappent aux clip boundaries (start/end de chaque clip + 0 + total + playhead) avec threshold ~10px. Helper `snapTo()` dans `editor-timeline.tsx`. (e) Dashboard : bouton "Lancer un render" qui ouvre un Dialog picker (3 col) → choix template → ouvre `RunRenderDialog`. (f) Rapport UX agent reçu (gardé pour application séparée). |
+| **Phase 5** | mai 2026 | (a) **Wizard 3 étapes `/render/new`** : Step 1 Upload (drop multi-fichiers MP4/MOV avec progress bars), Step 2 Templates (3 modes — `all` = N×M reels, `random` = N reels distribués, `per_video` = 1 template manuel par vidéo) + filtre langue FR/US/All, Step 3 Confirm (job name, spoofing toggle, récap reels). Stepper visuel en haut. Construit `assignments[]` selon le mode et POST `/api/render/batch`. Pour les modes `all` et `random`, le même token vidéo remplit TOUS les placeholders du template (les templates avec ≥1 placeholder seulement sont éligibles). Lien dashboard "Lancer un render" → `/render/new` (l'ancien picker dialog est retiré). Sidebar : nouvelle entrée "Nouveau render" (icône `Rocket`). RunRenderDialog par-card sur `/templates` reste, c'est le flow single-template. (b) **Apple emojis** : `@emoji-mart/data` + `@emoji-mart/react` + `emoji-mart` ajoutés. `frontend/.npmrc` avec `legacy-peer-deps=true` (peer-dep emoji-mart liste seulement React 16/17/18 — fonctionne fine sur 19). `lib/apple-emoji.ts` : map natif → unified codepoints construite depuis le dataset emoji-mart au load + fallback codepoint manuel ; `parseTextWithEmojis(text)` segmente via `Intl.Segmenter` (granularity grapheme) + détection `\p{Extended_Pictographic}`. URLs CDN : `https://cdn.jsdelivr.net/npm/emoji-datasource-apple@15.1.2/img/apple/64/{unified}.png`. `emoji-picker.tsx` réécrit comme wrapper dynamic-imported autour du Picker emoji-mart (`set="apple"`, `theme="dark"`, `locale="fr"`). `text-layer.tsx` : composant interne `<RenderedText>` injecte des `<img>` 1em pour chaque grapheme emoji, applique sur les 3 styles (plain/highlight/stroke) — limite : émojis dans style `stroke` n'ont pas d'outline parce que `text-shadow` n'affecte pas les images. Note importante : seul le **canvas preview** affiche Apple ; le rendu ffmpeg backend continue d'utiliser NotoColorEmoji. |
 
 ---
 
