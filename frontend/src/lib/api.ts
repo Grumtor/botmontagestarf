@@ -63,6 +63,39 @@ async function requestVoid(path: string, init?: RequestInit): Promise<void> {
   }
 }
 
+// ===== auth (Phase 30) ===============================================
+//
+// Note : on appelle le backend directement (pas via le proxy Next.js)
+// pour que le cookie de session soit bien posé sur le domaine racine
+// (.grumtor.com) et partagé entre bot.* et api.*.
+
+export const Auth = {
+  /** Logout : invalide le cookie côté serveur ET côté client. */
+  logout: async (): Promise<void> => {
+    try {
+      await fetch(`${BACKEND_DIRECT_URL}/api/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      /* ignore — on redirige quand même */
+    }
+    window.location.href = "/login";
+  },
+
+  /** Quick "am I logged in?" probe — returns true/false sans throw. */
+  me: async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`${BACKEND_DIRECT_URL}/api/auth/me`, {
+        credentials: "include",
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+};
+
 // ===== fonts =========================================================
 
 export const FontIdSchema = z.union([z.string(), z.number()]);

@@ -2,7 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Camera, LayoutDashboard, Layers, ListTodo, Rocket, Users } from "lucide-react";
+import {
+  Camera,
+  LayoutDashboard,
+  Layers,
+  ListTodo,
+  LogOut,
+  Rocket,
+  Users,
+} from "lucide-react";
+import { Auth } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type Item = {
@@ -35,7 +44,7 @@ export function Sidebar() {
       <div className="flex h-[50px] items-center border-b border-border px-4">
         <span className="text-sm font-semibold tracking-tight">bot-montage</span>
       </div>
-      <nav className="flex flex-col gap-1 p-3">
+      <nav className="flex flex-1 flex-col gap-1 p-3">
         {items.map((item) => {
           const active = isActive(pathname, item.href);
           const Icon = item.icon;
@@ -57,6 +66,17 @@ export function Sidebar() {
           );
         })}
       </nav>
+      {/* Phase 30 — logout button au bas de la sidebar */}
+      <div className="border-t border-border p-3">
+        <button
+          type="button"
+          onClick={() => void Auth.logout()}
+          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition hover:bg-accent/50 hover:text-foreground"
+        >
+          <LogOut className="h-4 w-4" />
+          Déconnexion
+        </button>
+      </div>
     </aside>
   );
 }

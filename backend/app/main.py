@@ -17,11 +17,13 @@ try:
 except Exception:
     pass
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
 from app.api.assets import router as assets_router
+from app.api.auth import router as auth_router
 from app.api.files import router as files_router
 from app.api.fonts import router as fonts_router
 from app.api.jobs import router as jobs_router
@@ -30,6 +32,7 @@ from app.api.render import router as render_router
 from app.api.sample_video import router as sample_video_router
 from app.api.templates import router as templates_router
 from app.api.vas import router as vas_router
+from app.auth import COOKIE_NAME, auth_enabled, verify_session_token
 from app.config import settings
 from app.db import Base, engine
 from app.storage import (
@@ -162,6 +165,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Phase 30 — auth middleware. Protects every /api/* endpoint by
+# default. Bypassed routes : /api/health (uptime check), /api/auth/*
+# (login/logout/status endpoints themselves), and OPTIONS preflights.
+# Returns 401 on missing/invalid cookie. No-op when auth is disabled.
+_PUBLIC_PREFIXES = ("/api/health", "/api/auth/")
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    # Always allow CORS preflights.
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    # Public endpoints (no auth required).
+    if any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+        return await call_next(request)
+    # Non-API routes (none currently, but keep safe).
+    if not path.startswith("/api/"):
+        return await call_next(request)
+    # Auth check (no-op if auth disabled).
+    if not auth_enabled():
+        return await call_next(request)
+    token = request.cookies.get(COOKIE_NAME)
+    if not token or not verify_session_token(token):
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": "Not authenticated"},
+        )
+    return await call_next(request)
+
+
+# Routes
+app.include_router(auth_router)         # /api/auth/* — public
 app.include_router(templates_router)
 app.include_router(assets_router)
 app.include_router(fonts_router)
