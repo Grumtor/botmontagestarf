@@ -58,24 +58,22 @@ def _clear_session_cookie(response: Response) -> None:
     )
 
 
-@router.post(
-    "/login",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
+@router.post("/login")
 def login(
     payload: LoginIn,
     request: Request,
     response: Response,
-) -> None:
+) -> dict:
     """Verify password, set a signed session cookie on success.
-    Returns 204 on success ; 401 on bad password ; 429 if rate-limited.
-    All responses are deliberately vague to not leak info."""
+    Returns 200 + {ok:true} on success ; 401 on bad password ;
+    429 if rate-limited. All error responses are deliberately vague
+    to not leak info."""
     if not auth_enabled():
         # Auth is off (legacy open mode). Login is a no-op : we still
         # set the cookie so the frontend's "logged in?" check works.
         token = create_session_token()
         _set_session_cookie(response, token)
-        return
+        return {"ok": True, "auth_enabled": False}
 
     ip = request.client.host if request.client else "unknown"
     retry_after = rate_check(ip)
@@ -99,17 +97,16 @@ def login(
 
     token = create_session_token()
     _set_session_cookie(response, token)
+    return {"ok": True}
 
 
-@router.post(
-    "/logout",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-def logout(response: Response) -> None:
+@router.post("/logout")
+def logout(response: Response) -> dict:
     """Clear the session cookie. The signed token isn't invalidated
     server-side (stateless) but the browser drops it. If you want
     real revocation, rotate BOTMONTAGE_SESSION_SECRET."""
     _clear_session_cookie(response)
+    return {"ok": True}
 
 
 @router.get(
