@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Layers, ListTodo, Rocket } from "lucide-react";
+import { Camera, LayoutDashboard, Layers, ListTodo, Rocket, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Item = {
@@ -15,6 +15,8 @@ const items: Item[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/render/new", label: "Nouveau render", icon: Rocket },
   { href: "/templates", label: "Templates", icon: Layers },
+  { href: "/photos", label: "Photos", icon: Camera },
+  { href: "/vas", label: "VAs", icon: Users },
   { href: "/jobs", label: "Jobs", icon: ListTodo },
 ];
 

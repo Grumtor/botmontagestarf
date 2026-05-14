@@ -36,6 +36,7 @@ export function TextLayerContent({
     alignItems: "center",
     justifyContent: justify,
     pointerEvents: "none",
+    opacity: typeof data.opacity === "number" ? data.opacity : 1,
   };
 
   const baseTextStyle: CSSProperties = {

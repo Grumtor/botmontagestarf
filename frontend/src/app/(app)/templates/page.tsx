@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Pause, Volume2, VolumeX } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import {
@@ -18,6 +19,7 @@ import {
 } from "@/components/templates/language-filter";
 import { NewTemplateDialog } from "@/components/templates/new-template-dialog";
 import { RunRenderDialog } from "@/components/templates/run-render-dialog";
+import { SampleVideoDialog } from "@/components/templates/sample-video-dialog";
 import { TemplateCard } from "@/components/templates/template-card";
 import { Templates, type Template, type TemplateCreateInput } from "@/lib/api";
 import { useRouter } from "next/navigation";
@@ -32,6 +34,14 @@ export default function TemplatesPage() {
   const [pendingDelete, setPendingDelete] = useState<Template | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [runRenderTarget, setRunRenderTarget] = useState<Template | null>(null);
+
+  // Shared video-player state across all template cards.
+  // Only ONE preview plays at a time — when a card calls
+  // `setCurrentlyPlayingId(template.id)`, the others react in their own
+  // useEffect and pause their <video>. `globalVolume` is the default
+  // volume applied to every card unless the card overrides locally.
+  const [currentlyPlayingId, setCurrentlyPlayingId] = useState<number | null>(null);
+  const [globalVolume, setGlobalVolume] = useState(0.5);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -94,18 +104,65 @@ export default function TemplatesPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Templates</h1>
           <p className="text-sm text-muted-foreground">Tes templates de montage.</p>
         </div>
-        <NewTemplateDialog onCreate={onCreate} />
+        <div className="flex items-center gap-2">
+          <SampleVideoDialog />
+          <NewTemplateDialog onCreate={onCreate} />
+        </div>
       </div>
 
       <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
         <LanguageFilter value={language} onChange={setLanguage} />
-        <Input
-          type="search"
-          placeholder="Rechercher par nom…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="sm:max-w-xs"
-        />
+        <div className="flex items-center gap-3">
+          {/* Pause globale — n'apparaît que quand un aperçu est en lecture.
+              Évite de scroller jusqu'à la card pour la stopper, et de
+              consommer des données inutilement quand on a oublié. */}
+          {currentlyPlayingId !== null && (
+            <button
+              type="button"
+              onClick={() => setCurrentlyPlayingId(null)}
+              className="flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/15 px-2 py-1 text-xs font-medium text-primary transition hover:bg-primary/25"
+              title="Mettre en pause l'aperçu en cours"
+            >
+              <Pause className="h-3.5 w-3.5" />
+              Pause aperçu
+            </button>
+          )}
+          {/* Global volume slider — default for every card.
+              Per-card sliders override on hover. */}
+          <div
+            className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1"
+            title="Volume global pour les aperçus"
+          >
+            <button
+              type="button"
+              onClick={() => setGlobalVolume(globalVolume > 0 ? 0 : 0.5)}
+              className="text-muted-foreground transition hover:text-foreground"
+              aria-label={globalVolume > 0 ? "Couper le son" : "Activer le son"}
+            >
+              {globalVolume > 0 ? (
+                <Volume2 className="h-3.5 w-3.5" />
+              ) : (
+                <VolumeX className="h-3.5 w-3.5" />
+              )}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={globalVolume}
+              onChange={(e) => setGlobalVolume(Number(e.target.value))}
+              className="h-1 w-20 accent-primary"
+            />
+          </div>
+          <Input
+            type="search"
+            placeholder="Rechercher par nom…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="sm:max-w-xs"
+          />
+        </div>
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
@@ -127,6 +184,9 @@ export default function TemplatesPage() {
               onDuplicate={onDuplicate}
               onDelete={(id) => setPendingDelete(items.find((x) => x.id === id) ?? null)}
               onRunRender={(template) => setRunRenderTarget(template)}
+              currentlyPlayingId={currentlyPlayingId}
+              setCurrentlyPlayingId={setCurrentlyPlayingId}
+              globalVolume={globalVolume}
             />
           ))}
         </div>

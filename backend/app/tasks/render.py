@@ -1,22 +1,30 @@
-"""Celery batch render task — clip-based.
+"""Batch render entry point — clip-based, runs in a background thread.
 
-A job's `assignments` is now a list of:
-    { template_id: int, fills: { clip_id: token } }
+A job's `assignments` is a list of:
+    { template_id: int, fills: { clip_id: token }, _gen?: int }
 
 For each entry, we resolve all file references via gather_render_inputs(),
 run ffmpeg (full quality), apply optional QuickTime spoofing, and ZIP
 everything at the end. Temp upload tokens are deleted after processing.
+
+Phase 29 — `metadata_profile["naming"]` controls how files are named
+in the final ZIP : "iphone" → IMG_xxxx.MOV (Apple-style), "default" →
+{slug(template)}_{i}.mp4. The naming applies only to the ZIP arcnames,
+the on-disk render outputs keep their internal scheme.
+
+Called by `app.worker.queue_render_job` from the API after a job row is
+created. Pure function — no Celery, no Redis, no magic.
 """
 
 from __future__ import annotations
 
 import logging
+import random
 import re
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.celery_app import celery_app
 from app.db import SessionLocal
 from app.db.models import JobStatus, RenderJob, Template
 from app.render.batch_runner import gather_render_inputs, run_render
@@ -33,7 +41,6 @@ def _slug(name: str, fallback: str = "x") -> str:
     return (s or fallback)[:50]
 
 
-@celery_app.task(name="process_render_job")
 def process_render_job(job_id: int) -> None:
     db = SessionLocal()
     consumed_tokens: set[str] = set()
@@ -64,17 +71,27 @@ def process_render_job(job_id: int) -> None:
         out_dir = RENDERS_DIR / str(job.id)
         out_dir.mkdir(parents=True, exist_ok=True)
         output_files: list[str] = []
+        # Phase 29 — track (file_path, gen_idx) so we can group outputs
+        # into `Generation N/` subdirs in the final ZIP when generations > 1.
+        output_entries: list[tuple[str, int]] = []
+        max_gen = 1
 
         for i, assign in enumerate(assignments):
             template_id = assign.get("template_id")
             fills = dict(assign.get("fills") or {})
+            gen_idx = int(assign.get("_gen") or 1)
+            if gen_idx > max_gen:
+                max_gen = gen_idx
 
             template = db.get(Template, template_id)
             if template is None:
                 log.warning("Template %s not found, skipping", template_id)
                 continue
 
-            file_name = f"{_slug(template.name, 'tpl')}_{i}.mp4"
+            # Filename inclut le gen index pour pas collisionner sur disk
+            # quand le même (template, fills) est rendu plusieurs fois.
+            gen_suffix = f"_g{gen_idx}" if gen_idx > 1 else ""
+            file_name = f"{_slug(template.name, 'tpl')}_{i}{gen_suffix}.mp4"
             output_path = out_dir / file_name
 
             try:
@@ -100,15 +117,43 @@ def process_render_job(job_id: int) -> None:
                     log.exception("metadata spoof failed for %s: %s", output_path, e)
 
             output_files.append(str(output_path))
+            output_entries.append((str(output_path), gen_idx))
             job.output_files = list(output_files)
             job.progress = int((i + 1) / total * 100)
             db.commit()
 
-        # ZIP all outputs
+        # ZIP all outputs. Phase 29 — Apple-style naming optionnel +
+        # group by pass when max_gen > 1 (each pass in its own subdir).
+        # Le label du sous-dossier vient de `metadata_profile.pass_label`
+        # — "Generation" par défaut (generations multiplier), "Tirage"
+        # pour le random reroll (Phase 29c).
+        naming = str(metadata_profile.get("naming") or "default").lower()
+        pass_label = str(metadata_profile.get("pass_label") or "Generation")
+        multi_gen = max_gen > 1
         zip_path = RENDERS_DIR / f"{job.id}.zip"
+        # Sort by gen_idx so output is grouped consistently in the ZIP.
+        sorted_entries = sorted(output_entries, key=lambda e: (e[1], e[0]))
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
-            for f in output_files:
-                zf.write(f, arcname=Path(f).name)
+            if naming == "iphone":
+                counter = random.randint(1500, 9000)
+                for f, gen_idx in sorted_entries:
+                    base_arc = f"IMG_{counter:04d}.MOV"
+                    counter += 1
+                    arcname = (
+                        f"{pass_label} {gen_idx}/{base_arc}"
+                        if multi_gen
+                        else base_arc
+                    )
+                    zf.write(f, arcname=arcname)
+            else:
+                for f, gen_idx in sorted_entries:
+                    base_arc = Path(f).name
+                    arcname = (
+                        f"{pass_label} {gen_idx}/{base_arc}"
+                        if multi_gen
+                        else base_arc
+                    )
+                    zf.write(f, arcname=arcname)
 
         job.output_zip_path = str(zip_path)
         job.status = JobStatus.done

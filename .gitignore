@@ -27,15 +27,20 @@ build/
 *.log
 npm-debug.log*
 
+# TypeScript build cache
+tsconfig.tsbuildinfo
+
 # IDE / OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+.claude/
 
-# Docker volumes
-postgres_data/
+# Local data dir (SQLite DB, uploads, renders, font cache, emoji cache)
+/data/
+backend/data/
 
-# Media (renders, uploaded clips, etc. — adjust to taste)
-backend/media/
-backend/uploads/
+# Optional bundled fonts (drop your own .ttf in here, gitignored)
+backend/fonts/*
+!backend/fonts/.gitkeep

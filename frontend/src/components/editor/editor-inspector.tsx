@@ -1,10 +1,12 @@
 "use client";
 
 import { useEditorStore } from "@/store/editor";
+import type { Clip, ExtraClip } from "@/lib/api";
 import { TextInspector } from "./text-inspector";
 import { AssetLayerInspector } from "./asset-layer-inspector";
 import { AudioOverlayInspector } from "./audio-inspectors";
 import { ClipInspector } from "./clip-inspector";
+import { SnapInspector } from "./snap-inspector";
 
 const VISUAL_LAYER_TYPES = new Set(["image", "gif", "emoji"]);
 
@@ -14,11 +16,26 @@ export function EditorInspector() {
       ? (s.layers.find((l) => l.id === s.selectedLayerId) ?? null)
       : null,
   );
-  const clip = useEditorStore((s) =>
-    s.selectedClipId
-      ? (s.clips.find((c) => c.id === s.selectedClipId) ?? null)
+  // Phase 26b — selected clip can be on the main track OR on an extra
+  // track. We resolve both via separate selectors that return STABLE
+  // references (the actual clip object from the store), so React's
+  // useSyncExternalStore doesn't see a new identity every render and
+  // loop forever.
+  const selectedClipId = useEditorStore((s) => s.selectedClipId);
+  const selectedExtraTrackId = useEditorStore((s) => s.selectedExtraTrackId);
+  const mainClip = useEditorStore((s) =>
+    selectedClipId && !selectedExtraTrackId
+      ? (s.clips.find((c) => c.id === selectedClipId) ?? null)
       : null,
   );
+  const extraClip = useEditorStore((s) => {
+    if (!selectedClipId || !selectedExtraTrackId) return null;
+    const track = s.extraTracks.find((t) => t.id === selectedExtraTrackId);
+    if (!track) return null;
+    return track.clips.find((c) => c.id === selectedClipId) ?? null;
+  });
+  const clip: Clip | ExtraClip | null = mainClip ?? extraClip;
+  const extraTrackId = extraClip ? (selectedExtraTrackId ?? undefined) : undefined;
   const audioSelected = useEditorStore((s) => s.audioSelected);
 
   return (
@@ -28,7 +45,7 @@ export function EditorInspector() {
       </div>
       <div className="flex-1 overflow-y-auto p-4">
         {clip ? (
-          <ClipInspector clip={clip} />
+          <ClipInspector clip={clip} extraTrackId={extraTrackId} />
         ) : audioSelected ? (
           <AudioOverlayInspector />
         ) : layer === null ? (
@@ -37,6 +54,8 @@ export function EditorInspector() {
           </p>
         ) : layer.type === "text" ? (
           <TextInspector layer={layer} />
+        ) : layer.type === "snap" ? (
+          <SnapInspector layer={layer} />
         ) : VISUAL_LAYER_TYPES.has(layer.type) ? (
           <AssetLayerInspector layer={layer} />
         ) : (

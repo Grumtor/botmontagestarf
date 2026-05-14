@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Eye, Save } from "lucide-react";
+import { ArrowLeft, Eye, Image as ImageIcon, Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Render } from "@/lib/api";
 import { useEditorStore } from "@/store/editor";
+import { CoverPickerDialog } from "./cover-picker-dialog";
 import { RenderPreviewDialog } from "./render-preview-dialog";
 
 export function EditorTopbar() {
@@ -24,6 +25,11 @@ export function EditorTopbar() {
   const [renderLoading, setRenderLoading] = useState(false);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [renderUrl, setRenderUrl] = useState<string | null>(null);
+
+  // Custom cover dialog: lets the user pick a frame from the preview MP4
+  // at a chosen timestamp. The frame is ffmpeg-extracted server-side and
+  // stored as the template's cover image.
+  const [coverOpen, setCoverOpen] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -85,6 +91,22 @@ export function EditorTopbar() {
         >
           {template.language === "FR" ? "🇫🇷 FR" : "🇺🇸 US"}
         </button>
+
+        {/* Cover de la card /templates : pioche une frame de l'aperçu
+            au timestamp choisi par l'user. */}
+        <button
+          type="button"
+          onClick={() => setCoverOpen(true)}
+          className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs transition hover:bg-accent"
+          title={
+            template.cover_ext
+              ? `Changer la cover (actuelle : ${(template.cover_time_sec ?? 0).toFixed(2)}s)`
+              : "Choisir une frame de l'aperçu comme cover de la card"
+          }
+        >
+          <ImageIcon className="h-3 w-3" />
+          {template.cover_ext ? "Cover ✓" : "Cover"}
+        </button>
       </div>
 
       <div className="flex items-center gap-2">
@@ -121,6 +143,18 @@ export function EditorTopbar() {
         blobUrl={renderUrl}
         loading={renderLoading}
         error={renderError}
+      />
+
+      <CoverPickerDialog
+        open={coverOpen}
+        onOpenChange={setCoverOpen}
+        template={template}
+        onChange={(next) => {
+          patchTemplate({
+            cover_ext: next.cover_ext,
+            cover_time_sec: next.cover_time_sec,
+          });
+        }}
       />
     </header>
   );

@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.api.templates import find_template_file
 from app.db import get_db
 from app.db.models import Asset, RenderJob, Template
-from app.storage import template_thumb_path
+from app.storage import find_template_cover, template_thumb_path
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -63,6 +63,23 @@ def serve_template_clip_thumb(
     return FileResponse(p, media_type="image/jpeg")
 
 
+@router.get("/template_clip_strip/{template_id}/{file_id}")
+def serve_template_clip_strip(
+    template_id: int, file_id: str, db: Session = Depends(get_db)
+) -> FileResponse:
+    """Serve the wide filmstrip JPEG generated at upload time (Phase 27).
+    The frontend uses it as a background-image stretched horizontally
+    across the clip block so the user can see what's inside the video."""
+    from app.storage import template_clips_dir
+
+    if db.get(Template, template_id) is None:
+        raise HTTPException(404, "Template not found")
+    p = template_clips_dir(template_id) / f"{file_id}_strip.jpg"
+    if not p.is_file():
+        raise HTTPException(404, "Filmstrip not found")
+    return FileResponse(p, media_type="image/jpeg")
+
+
 @router.get("/template_overlay/{template_id}/{file_id}")
 def serve_template_overlay(
     template_id: int, file_id: str, db: Session = Depends(get_db)
@@ -85,6 +102,26 @@ def serve_template_thumb(
     if not p.is_file():
         raise HTTPException(404, "No thumbnail")
     return FileResponse(p)
+
+
+@router.get("/template_cover/{template_id}")
+def serve_template_cover(
+    template_id: int, db: Session = Depends(get_db)
+) -> FileResponse:
+    """User-uploaded cover image used by the /templates grid card.
+    404 when no custom cover — frontend falls back to template_thumb."""
+    if db.get(Template, template_id) is None:
+        raise HTTPException(404, "Template not found")
+    p = find_template_cover(template_id)
+    if p is None or not p.is_file():
+        raise HTTPException(404, "No custom cover")
+    media = {
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+        "webp": "image/webp",
+    }.get(p.suffix.lstrip(".").lower(), "application/octet-stream")
+    return FileResponse(p, media_type=media)
 
 
 @router.get("/template_preview/{template_id}")

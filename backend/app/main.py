@@ -1,72 +1,150 @@
-import logging
-from contextlib import asynccontextmanager
-from pathlib import Path
+"""FastAPI app for the local-only setup.
 
-from alembic import command
-from alembic.config import Config
+No auth, no Alembic, no admin endpoints. Schema is created on first boot
+via `Base.metadata.create_all()`. The render worker is started as a
+ThreadPoolExecutor in the same process and stopped on shutdown.
+"""
+
+import logging
+import sys
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 
 from app.api.assets import router as assets_router
 from app.api.files import router as files_router
 from app.api.fonts import router as fonts_router
 from app.api.jobs import router as jobs_router
+from app.api.photos import router as photos_router
 from app.api.render import router as render_router
+from app.api.sample_video import router as sample_video_router
 from app.api.templates import router as templates_router
-from app.auth.routes import router as auth_router
+from app.api.vas import router as vas_router
 from app.config import settings
-from app.middleware import AuthMiddleware
+from app.db import Base, engine
 from app.storage import (
     cleanup_orphan_temp_uploads,
     ensure_dirs,
     ensure_placeholder_preview,
     install_builtin_fonts,
 )
+from app.worker import start_worker, stop_worker
 
 log = logging.getLogger(__name__)
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent
 
-
-def _run_migrations() -> None:
-    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
-    cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", settings.database_url)
-    command.upgrade(cfg, "head")
+def _step(msg: str) -> None:
+    """Print + flush so the user can SEE which lifespan step we're at,
+    even when uvicorn buffers logs. Crucial on Windows where ffmpeg
+    subprocesses sometimes hang invisibly."""
+    print(f"[lifespan] {msg}", flush=True)
+    sys.stdout.flush()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _step("lifespan start")
+
+    # Filesystem
+    _step("1/7 ensure_dirs…")
     try:
         ensure_dirs()
+        _step("    ✓ ensure_dirs OK")
     except Exception as e:
+        _step(f"    ✗ ensure_dirs failed: {e}")
         log.exception("ensure_dirs failed: %s", e)
 
+    # SQLite schema — idempotent, fast, no migrations needed in local mode.
+    _step("2/7 create_all (SQLite schema)…")
+    try:
+        Base.metadata.create_all(bind=engine)
+        _step("    ✓ create_all OK")
+    except Exception as e:
+        _step(f"    ✗ create_all failed: {e}")
+        log.exception("create_all failed: %s", e)
+
+    # Lightweight column-add migration for existing DBs (create_all only
+    # creates new tables, it doesn't ALTER existing ones). Safe to run on
+    # every boot — only adds missing nullable columns.
+    _step("3/7 column migrations (cover_ext, cover_time_sec, extra_tracks)…")
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(engine)
+        existing_cols = {c["name"] for c in inspector.get_columns("templates")}
+        if "cover_ext" not in existing_cols:
+            with engine.begin() as conn:
+                conn.execute(
+                    text("ALTER TABLE templates ADD COLUMN cover_ext VARCHAR")
+                )
+            _step("    + cover_ext added")
+        if "cover_time_sec" not in existing_cols:
+            with engine.begin() as conn:
+                conn.execute(
+                    text("ALTER TABLE templates ADD COLUMN cover_time_sec FLOAT")
+                )
+            _step("    + cover_time_sec added")
+        if "extra_tracks" not in existing_cols:
+            with engine.begin() as conn:
+                # SQLite stores JSON as TEXT under the hood. Default '[]'
+                # so existing rows have an empty list (legacy single-track).
+                conn.execute(
+                    text(
+                        "ALTER TABLE templates ADD COLUMN extra_tracks JSON "
+                        "NOT NULL DEFAULT '[]'"
+                    )
+                )
+            _step("    + extra_tracks added")
+        _step("    ✓ migrations OK")
+    except Exception as e:
+        _step(f"    ✗ migrations failed: {e}")
+        log.exception("template column migration failed: %s", e)
+
+    # Built-in fonts (Inter / Montserrat from system packages, copied into
+    # the data dir so the renderer always finds them at a stable path).
+    _step("4/7 install_builtin_fonts…")
     try:
         install_builtin_fonts()
+        _step("    ✓ install_builtin_fonts OK")
     except Exception as e:
+        _step(f"    ✗ install_builtin_fonts failed: {e}")
         log.exception("install_builtin_fonts failed: %s", e)
 
+    # 30s black mp4 used as a placeholder source for unfilled previews.
+    # This calls ffmpeg with `-f lavfi color=black` and a 60s timeout.
+    # Skipped if the file already exists. If it hangs (Defender scan,
+    # zombie ffmpeg) the timeout will fire and we continue.
+    _step("5/7 ensure_placeholder_preview (may run ffmpeg, ~60s on 1st boot)…")
     try:
         ensure_placeholder_preview()
+        _step("    ✓ ensure_placeholder_preview OK")
     except Exception as e:
+        _step(f"    ✗ ensure_placeholder_preview failed: {e}")
         log.exception("ensure_placeholder_preview failed: %s", e)
 
+    # Garbage-collect uploads from abandoned dialogs older than 24h.
+    _step("6/7 cleanup_orphan_temp_uploads…")
     try:
         cleanup_orphan_temp_uploads(max_age_hours=24)
+        _step("    ✓ cleanup OK")
     except Exception as e:
+        _step(f"    ✗ cleanup failed: {e}")
         log.exception("cleanup_orphan_temp_uploads failed: %s", e)
 
-    # Migrations are no longer run at boot — they hang on Railway when
-    # DATABASE_URL is misconfigured. Run them manually after deploy via
-    # Railway CLI: `railway run --service <name> alembic upgrade head`
-    # or expose them through a dedicated admin endpoint.
-    yield
+    # Background render worker
+    _step("7/7 start_worker…")
+    start_worker()
+    _step("    ✓ worker started")
+    _step("lifespan READY — server is now listening")
+    try:
+        yield
+    finally:
+        _step("lifespan shutdown — stop_worker")
+        stop_worker()
 
 
-app = FastAPI(title="bot-montage", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="bot-montage", version="0.2.0-local", lifespan=lifespan)
 
-# CORS first so the auth middleware doesn't strip headers from preflight.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
@@ -74,30 +152,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(AuthMiddleware)
 
-app.include_router(auth_router)
 app.include_router(templates_router)
 app.include_router(assets_router)
 app.include_router(fonts_router)
 app.include_router(files_router)
 app.include_router(render_router)
 app.include_router(jobs_router)
+app.include_router(photos_router)
+app.include_router(vas_router)
+app.include_router(sample_video_router)
 
 
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok"}
-
-
-@app.post("/api/_admin/migrate")
-def run_migrations_endpoint(secret: str) -> dict:
-    """One-shot migration runner. Pass ?secret=<JWT_SECRET> as query param.
-    Use only at first deploy / after schema changes."""
-    if secret != settings.jwt_secret:
-        return {"ok": False, "detail": "forbidden"}
-    try:
-        _run_migrations()
-        return {"ok": True}
-    except Exception as e:
-        return {"ok": False, "detail": str(e)[:500]}

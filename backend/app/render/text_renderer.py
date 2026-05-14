@@ -230,7 +230,11 @@ def render_text_layer_to_png(
         return None
 
     font_size = max(8, int(float(data.get("font_size_pct", 5)) / 100 * output_h))
-    color = _hex(data.get("color", "#FFFFFF"))
+    try:
+        opacity = max(0.0, min(1.0, float(data.get("opacity", 1.0))))
+    except (TypeError, ValueError):
+        opacity = 1.0
+    color = _apply_opacity(_hex(data.get("color", "#FFFFFF")), opacity)
     align = str(data.get("align", "center"))
     style = str(data.get("style", "plain"))
     line_height = float(data.get("line_height", 1.2))
@@ -264,7 +268,12 @@ def render_text_layer_to_png(
     except Exception:
         ascent, descent = font_size, int(font_size * 0.2)
     base_line_h = ascent + descent
-    line_spacing = int(round(base_line_h * line_height))
+    # CSS-equivalent line spacing: line-height multiplies the font-size,
+    # NOT the natural ascent+descent box. Using ascent+descent here would
+    # give a noticeably more spaced-out output than the editor canvas
+    # (which uses CSS), since most fonts have ascent+descent ≈ 1.1-1.3 ×
+    # font_size. Multiplying by font_size keeps the two paths in sync.
+    line_spacing = int(round(font_size * line_height))
 
     # Letter spacing — Pillow doesn't directly support it, so we render
     # character-by-character when ≠ 0. Cheap to skip when the user leaves
@@ -295,17 +304,17 @@ def render_text_layer_to_png(
     canvas = Image.new("RGBA", (output_w, output_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
 
-    # Style-specific paint params.
+    # Style-specific paint params. Opacity scales every coloured run.
     stroke_w = 0
     stroke_color = (0, 0, 0, 255)
     if style == "stroke":
         stroke_w = max(1, int(float(data.get("stroke_width", 4))))
-        stroke_color = _hex(data.get("stroke_color", "#000000"))
+        stroke_color = _apply_opacity(_hex(data.get("stroke_color", "#000000")), opacity)
     hl_color: Optional[tuple[int, int, int, int]] = None
     hl_pad_x = 0
     hl_pad_y = 0
     if style == "highlight":
-        hl_color = _hex(data.get("highlight_color", "#FFEB3B"))
+        hl_color = _apply_opacity(_hex(data.get("highlight_color", "#FFEB3B")), opacity)
         pad = int(data.get("highlight_padding", 6))
         hl_pad_x = max(0, pad)
         hl_pad_y = max(0, int(pad * 0.25))
@@ -343,7 +352,13 @@ def render_text_layer_to_png(
                 # Centre emoji vertically within the text line so it sits
                 # baseline-ish — same visual feel as the canvas preview.
                 em_y = int(y_line + (base_line_h - emoji_size) / 2)
-                canvas.alpha_composite(tok.image, (int(cursor), em_y))
+                em_img = tok.image
+                if opacity < 1.0:
+                    # Multiply emoji's alpha channel by the layer opacity.
+                    alpha = em_img.split()[-1].point(lambda a: int(a * opacity))
+                    em_img = em_img.copy()
+                    em_img.putalpha(alpha)
+                canvas.alpha_composite(em_img, (int(cursor), em_y))
                 cursor += tok.width
                 continue
 
@@ -415,6 +430,15 @@ def _hex(value: Any) -> tuple[int, int, int, int]:
         return (r, g, b, 255)
     except ValueError:
         return (255, 255, 255, 255)
+
+
+def _apply_opacity(rgba: tuple[int, int, int, int], opacity: float) -> tuple[int, int, int, int]:
+    """Multiply an RGBA tuple's alpha channel by opacity (0..1)."""
+    if opacity >= 1.0:
+        return rgba
+    if opacity <= 0.0:
+        return (rgba[0], rgba[1], rgba[2], 0)
+    return (rgba[0], rgba[1], rgba[2], max(0, min(255, int(round(rgba[3] * opacity)))))
 
 
 def cache_key_for_layer(layer: dict[str, Any], output_w: int, output_h: int) -> str:

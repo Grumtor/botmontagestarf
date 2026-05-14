@@ -64,13 +64,13 @@ const COUNTRY_LANG: Record<string, string> = {
 
 const MODELS = [
   "iPhone 16",
-  "iPhone 16 Plus",
   "iPhone 16 Pro",
   "iPhone 16 Pro Max",
   "iPhone 17",
   "iPhone 17 Pro",
   "iPhone 17 Pro Max",
 ];
+const DEFAULT_MODEL = "iPhone 17";
 
 const LANGUAGES = [
   "en-US",
@@ -128,7 +128,8 @@ export function RunRenderDialog({ template, onClose }: Props) {
   const [uploads, setUploads] = useState<Record<string, Pending[]>>({});
   const [jobName, setJobName] = useState("");
   const [spoofEnabled, setSpoofEnabled] = useState(false);
-  const [model, setModel] = useState("iPhone 17 Pro");
+  const [model, setModel] = useState(DEFAULT_MODEL);
+  const [showModelPicker, setShowModelPicker] = useState(false);
   const [country, setCountry] = useState("USA");
   const [language, setLanguage] = useState("en-US");
   const [dateWindow, setDateWindow] = useState(7);
@@ -141,7 +142,8 @@ export function RunRenderDialog({ template, onClose }: Props) {
       setUploads({});
       setJobName(defaultJobName(template.name));
       setSpoofEnabled(false);
-      setModel("iPhone 17 Pro");
+      setModel(DEFAULT_MODEL);
+      setShowModelPicker(false);
       setCountry("USA");
       setLanguage("en-US");
       setDateWindow(7);
@@ -310,6 +312,8 @@ export function RunRenderDialog({ template, onClose }: Props) {
             setEnabled={setSpoofEnabled}
             model={model}
             setModel={setModel}
+            showModelPicker={showModelPicker}
+            setShowModelPicker={setShowModelPicker}
             country={country}
             setCountry={onCountryChange}
             language={language}
@@ -474,6 +478,8 @@ function SpoofingPanel({
   setEnabled,
   model,
   setModel,
+  showModelPicker,
+  setShowModelPicker,
   country,
   setCountry,
   language,
@@ -485,6 +491,8 @@ function SpoofingPanel({
   setEnabled: (b: boolean) => void;
   model: string;
   setModel: (s: string) => void;
+  showModelPicker: boolean;
+  setShowModelPicker: (b: boolean) => void;
   country: string;
   setCountry: (s: string) => void;
   language: string;
@@ -505,31 +513,66 @@ function SpoofingPanel({
         )}
       >
         <span>Spoofer les métadonnées (iPhone)</span>
-        <span className="text-muted-foreground">{enabled ? "ON" : "OFF"}</span>
+        <OnOffBadge enabled={enabled} />
       </button>
 
       {enabled && (
         <div className="space-y-3 rounded-md border border-border bg-card p-3">
+          {/* Modèle iPhone — défaut iPhone 17, click "Changer" pour swap */}
+          <div className="space-y-1.5">
+            <div className="text-xs text-muted-foreground">
+              Profil camera
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-md border border-border bg-background px-2.5 py-1 text-[11px]">
+                📱 {model}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowModelPicker(!showModelPicker)}
+                className="text-[11px] text-muted-foreground underline transition hover:text-foreground"
+              >
+                {showModelPicker ? "Replier" : "Changer"}
+              </button>
+            </div>
+            {showModelPicker && (
+              <div className="flex flex-wrap gap-1.5 rounded-md border border-border bg-background/40 p-2">
+                {MODELS.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => {
+                      setModel(m);
+                      setShowModelPicker(false);
+                    }}
+                    className={cn(
+                      "rounded-md border px-2.5 py-1 text-[11px] transition",
+                      m === model
+                        ? "border-primary bg-accent"
+                        : "border-border hover:bg-accent/50",
+                    )}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
-            <SelectField
-              label="Profil camera"
-              value={model}
-              options={MODELS.map((m) => ({ value: m, label: m }))}
-              onChange={setModel}
-            />
             <SelectField
               label="Pays"
               value={country}
               options={COUNTRIES}
               onChange={setCountry}
             />
+            <SelectField
+              label="Langue"
+              value={language}
+              options={LANGUAGES.map((l) => ({ value: l, label: l }))}
+              onChange={setLanguage}
+            />
           </div>
-          <SelectField
-            label="Langue"
-            value={language}
-            options={LANGUAGES.map((l) => ({ value: l, label: l }))}
-            onChange={setLanguage}
-          />
           <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted-foreground">
               Date dans les {dateWindow} derniers jours
@@ -577,5 +620,23 @@ function SelectField({
         </SelectContent>
       </Select>
     </label>
+  );
+}
+
+/** Small green-on / red-off pill, used in the spoofing toggle row.
+ *  Replaces the old plain "ON" / "OFF" muted text — the colour gives an
+ *  at-a-glance signal that spoofing is engaged before launching a job. */
+function OnOffBadge({ enabled }: { enabled: boolean }) {
+  return (
+    <span
+      className={cn(
+        "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1",
+        enabled
+          ? "bg-emerald-500/20 text-emerald-300 ring-emerald-500/40"
+          : "bg-red-500/20 text-red-300 ring-red-500/40",
+      )}
+    >
+      {enabled ? "ON" : "OFF"}
+    </span>
   );
 }

@@ -3,6 +3,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from app.bin_finder import ffmpeg_env, ffmpeg_exe, ffprobe_exe
+
 
 class MediaError(Exception):
     """Raised when ffprobe or ffmpeg fails."""
@@ -12,7 +14,7 @@ def ffprobe(path: Path) -> dict:
     try:
         result = subprocess.run(
             [
-                "ffprobe",
+                ffprobe_exe(),
                 "-v",
                 "error",
                 "-print_format",
@@ -24,6 +26,7 @@ def ffprobe(path: Path) -> dict:
             capture_output=True,
             text=True,
             check=True,
+            env=ffmpeg_env(),
         )
         return json.loads(result.stdout)
     except subprocess.CalledProcessError as e:
@@ -68,7 +71,7 @@ def make_video_thumb(
     try:
         subprocess.run(
             [
-                "ffmpeg",
+                ffmpeg_exe(),
                 "-y",
                 "-ss",
                 "1",
@@ -84,6 +87,7 @@ def make_video_thumb(
             ],
             capture_output=True,
             check=True,
+            env=ffmpeg_env(),
         )
     except subprocess.CalledProcessError as e:
         msg = e.stderr.decode("utf-8", errors="replace")[-200:]

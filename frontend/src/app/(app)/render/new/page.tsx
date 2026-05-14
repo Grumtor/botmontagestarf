@@ -81,13 +81,13 @@ const COUNTRY_LANG: Record<string, string> = {
 };
 const MODELS = [
   "iPhone 16",
-  "iPhone 16 Plus",
   "iPhone 16 Pro",
   "iPhone 16 Pro Max",
   "iPhone 17",
   "iPhone 17 Pro",
   "iPhone 17 Pro Max",
 ];
+const DEFAULT_MODEL = "iPhone 17";
 const LANGUAGES = [
   "en-US",
   "en-CA",
@@ -142,15 +142,26 @@ export default function RenderWizardPage() {
   const [langFilter, setLangFilter] = useState<TemplateLanguage | "ALL">("ALL");
   const [mode, setMode] = useState<WizardMode>("all");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [perVideoTpl, setPerVideoTpl] = useState<Record<string, number>>({});
+  // Per-video → array of template ids. Each (video, template) pair = 1 reel,
+  // so sélection multiple permet de croiser une vidéo avec plusieurs templates.
+  const [perVideoTpl, setPerVideoTpl] = useState<Record<string, number[]>>({});
 
   // Step 3 — confirm
   const [jobName, setJobName] = useState(defaultJobName());
   const [spoofEnabled, setSpoofEnabled] = useState(false);
-  const [model, setModel] = useState("iPhone 17 Pro");
+  const [model, setModel] = useState(DEFAULT_MODEL);
+  const [showModelPicker, setShowModelPicker] = useState(false);
   const [country, setCountry] = useState("USA");
   const [language, setLanguage] = useState("en-US");
   const [dateWindow, setDateWindow] = useState(7);
+  // Phase 29 — multiplicateur "Générations" + naming Apple-style.
+  const [generations, setGenerations] = useState(1);
+  const [iphoneNaming, setIphoneNaming] = useState(true);
+  // Phase 29c — random reroll : nombre de passes random. Chaque pass
+  // re-shuffle l'attribution vidéo↔template, donc mappings différents
+  // entre les passes. N'apparaît qu'en mode "random". Max = nombre
+  // de templates sélectionnés (au-delà, le shuffle se répète vainement).
+  const [randomPasses, setRandomPasses] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -180,21 +191,33 @@ export default function RenderWizardPage() {
   const allVideosReady =
     uploads.length > 0 && readyVideos.length === uploads.length;
 
-  // Reels count (depends on mode)
-  const reelCount = useMemo(() => {
+  // Reels count (depends on mode). Phase 29 — multiplie par
+  // `generations` (chaque generation = 1 copie supplémentaire de
+  // chaque assignment avec metadata indépendante). Phase 29c — en
+  // mode random, le multiplicateur effectif est `randomPasses`
+  // (chaque pass = nouveau mapping vidéo→template, différent des
+  // générations).
+  const baseReelCount = useMemo(() => {
     const v = readyVideos.length;
     const t = selectedIds.size;
     if (v === 0 || (mode !== "per_video" && t === 0)) return 0;
     if (mode === "all") return v * t;
     if (mode === "random") return v;
     if (mode === "per_video") {
-      // Count videos that have a template assigned
-      return readyVideos.filter((u) => perVideoTpl[u.id] != null).length;
+      // Sum of templates picked per video (each pair = 1 reel).
+      return readyVideos.reduce(
+        (acc, u) => acc + (perVideoTpl[u.id]?.length ?? 0),
+        0,
+      );
     }
     return 0;
   }, [readyVideos, selectedIds, mode, perVideoTpl]);
+  // En mode random : multi-pass via randomPasses (mappings différents).
+  // Autres modes : generations classique (metadata uniquement).
+  const effectiveMultiplier = mode === "random" ? randomPasses : generations;
+  const reelCount = baseReelCount * effectiveMultiplier;
 
-  const overLimit = reelCount > 50;
+  const overLimit = reelCount > 500;
 
   // ===== step 1 actions ===========================================
 
@@ -261,10 +284,15 @@ export default function RenderWizardPage() {
   function buildAssignments(): {
     template_id: number;
     fills: Record<string, string>;
+    gen_idx?: number;
   }[] {
     if (!allTemplates) return [];
     const tplById = new Map(allTemplates.map((t) => [t.id, t]));
-    const out: { template_id: number; fills: Record<string, string> }[] = [];
+    const out: {
+      template_id: number;
+      fills: Record<string, string>;
+      gen_idx?: number;
+    }[] = [];
     const fillFor = (tpl: Template, token: string) => {
       const fills: Record<string, string> = {};
       for (const p of getPlaceholders(tpl)) {
@@ -286,22 +314,35 @@ export default function RenderWizardPage() {
     } else if (mode === "random") {
       const tplIds = Array.from(selectedIds);
       if (tplIds.length === 0) return [];
-      // Shuffle template order so the video → template mapping varies.
-      const pool = [...tplIds].sort(() => Math.random() - 0.5);
-      readyVideos.forEach((v, i) => {
-        if (!v.token) return;
-        const tpl = tplById.get(pool[i % pool.length]);
-        if (!tpl) return;
-        out.push({ template_id: tpl.id, fills: fillFor(tpl, v.token) });
-      });
+      // Phase 29c — multi-pass random reroll. Pour chaque pass on
+      // re-shuffle l'ordre des templates et on assigne chaque vidéo à
+      // une template fresh. `gen_idx` est posé sur l'assignment pour
+      // que le backend skip son propre multiplier et groupe les outputs
+      // dans `Tirage N/` au ZIP.
+      const passes = Math.max(1, randomPasses);
+      for (let pass = 0; pass < passes; pass++) {
+        const pool = [...tplIds].sort(() => Math.random() - 0.5);
+        readyVideos.forEach((v, i) => {
+          if (!v.token) return;
+          const tpl = tplById.get(pool[i % pool.length]);
+          if (!tpl) return;
+          out.push({
+            template_id: tpl.id,
+            fills: fillFor(tpl, v.token),
+            gen_idx: pass + 1,
+          });
+        });
+      }
     } else {
-      // per_video
+      // per_video — chaque (vidéo, template) sélectionné = 1 reel.
       for (const v of readyVideos) {
-        const tplId = perVideoTpl[v.id];
-        if (tplId == null || !v.token) continue;
-        const tpl = tplById.get(tplId);
-        if (!tpl) continue;
-        out.push({ template_id: tpl.id, fills: fillFor(tpl, v.token) });
+        if (!v.token) continue;
+        const tplIds = perVideoTpl[v.id] ?? [];
+        for (const tplId of tplIds) {
+          const tpl = tplById.get(tplId);
+          if (!tpl) continue;
+          out.push({ template_id: tpl.id, fills: fillFor(tpl, v.token) });
+        }
       }
     }
 
@@ -316,13 +357,25 @@ export default function RenderWizardPage() {
       if (assignments.length === 0) {
         throw new Error("Rien à rendre — vérifie les sélections.");
       }
-      const job = await Render.batch(jobName, assignments, {
-        enabled: spoofEnabled,
-        model,
-        country,
-        language,
-        date_window_days: dateWindow,
-      });
+      const job = await Render.batch(
+        jobName,
+        assignments,
+        {
+          enabled: spoofEnabled,
+          model,
+          country,
+          language,
+          date_window_days: dateWindow,
+        },
+        // Generations slider est inactif en mode random (frontend a déjà
+        // multi-passed). Sinon legacy multiplier.
+        mode === "random" ? 1 : generations,
+        iphoneNaming ? "iphone" : "default",
+        // Phase 29c — label des sous-dossiers ZIP. "Tirage N/" en mode
+        // random (mappings différents par pass), "Generation N/" sinon
+        // (metadata différentes pour mêmes assignments).
+        mode === "random" ? "Tirage" : "Generation",
+      );
       router.push(`/jobs/${job.id}`);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Erreur");
@@ -337,8 +390,10 @@ export default function RenderWizardPage() {
     if (step === 1) return allVideosReady;
     if (step === 2) {
       if (mode === "per_video") {
-        // Every uploaded video must have a template chosen.
-        return readyVideos.every((v) => perVideoTpl[v.id] != null);
+        // Every uploaded video must have at least one template picked.
+        return readyVideos.every(
+          (v) => (perVideoTpl[v.id]?.length ?? 0) > 0,
+        );
       }
       return selectedIds.size > 0;
     }
@@ -391,6 +446,8 @@ export default function RenderWizardPage() {
             setSpoofEnabled={setSpoofEnabled}
             model={model}
             setModel={setModel}
+            showModelPicker={showModelPicker}
+            setShowModelPicker={setShowModelPicker}
             country={country}
             setCountry={(c) => {
               setCountry(c);
@@ -401,9 +458,16 @@ export default function RenderWizardPage() {
             setLanguage={setLanguage}
             dateWindow={dateWindow}
             setDateWindow={setDateWindow}
+            generations={generations}
+            setGenerations={setGenerations}
+            randomPasses={randomPasses}
+            setRandomPasses={setRandomPasses}
+            iphoneNaming={iphoneNaming}
+            setIphoneNaming={setIphoneNaming}
             videoCount={readyVideos.length}
             templateCount={selectedIds.size}
             mode={mode}
+            baseReelCount={baseReelCount}
             reelCount={reelCount}
             overLimit={overLimit}
             error={submitError}
@@ -631,8 +695,10 @@ function Step2Templates({
   onSelectAll: () => void;
   onClear: () => void;
   videos: Pending[];
-  perVideoTpl: Record<string, number>;
-  setPerVideoTpl: React.Dispatch<React.SetStateAction<Record<string, number>>>;
+  perVideoTpl: Record<string, number[]>;
+  setPerVideoTpl: React.Dispatch<
+    React.SetStateAction<Record<string, number[]>>
+  >;
 }) {
   return (
     <div className="space-y-5">
@@ -644,7 +710,7 @@ function Step2Templates({
           {mode === "random" &&
             "Chaque vidéo sera assignée aléatoirement à un des templates sélectionnés."}
           {mode === "per_video" &&
-            "Choisis un template précis pour chacune de tes vidéos."}
+            "Choisis un ou plusieurs templates par vidéo. 1 reel par paire (vidéo × template)."}
         </p>
       </div>
 
@@ -669,7 +735,7 @@ function Step2Templates({
           onClick={() => setMode("per_video")}
           icon={<ListChecks className="h-4 w-4" />}
           title="Per-video"
-          subtitle="1 template par vidéo (manuel)"
+          subtitle="N templates par vidéo (manuel)"
         />
       </div>
 
@@ -751,16 +817,9 @@ function Step2Templates({
                 )}
               >
                 <div className="relative aspect-[9/16] w-full bg-black">
-                  <img
-                    src={`/api/files/template_thumb/${t.id}`}
-                    alt=""
-                    className="absolute inset-0 h-full w-full object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = "none";
-                    }}
-                  />
+                  <WizardTemplatePreview template={t} />
                   {selected && (
-                    <div className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                    <div className="absolute right-1.5 top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
                       <Check className="h-3 w-3" />
                     </div>
                   )}
@@ -778,6 +837,63 @@ function Step2Templates({
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Preview de template dans le wizard de render. Chaîne de fallback :
+ *   1. Cover custom (si l'user a piqué une frame via Phase 24)
+ *   2. Premier frame du preview MP4 (si l'user a déjà cliqué "Aperçu rendu")
+ *   3. Auto-thumb extrait à l'upload du premier clip vidéo
+ *   4. Rien (carré noir)
+ *
+ * Le `<video preload="metadata">` charge juste la metadata + la première
+ * frame, donc c'est léger même avec 20 templates en grille.
+ */
+function WizardTemplatePreview({ template }: { template: Template }) {
+  const [coverFailed, setCoverFailed] = useState(false);
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const [thumbFailed, setThumbFailed] = useState(false);
+
+  const ts = new Date(template.updated_at).getTime();
+
+  if (template.cover_ext && !coverFailed) {
+    return (
+      <img
+        src={`/api/files/template_cover/${template.id}?t=${ts}`}
+        alt=""
+        className="absolute inset-0 h-full w-full object-cover"
+        onError={() => setCoverFailed(true)}
+      />
+    );
+  }
+  if (!previewFailed) {
+    return (
+      // eslint-disable-next-line jsx-a11y/media-has-caption
+      <video
+        src={`/api/files/template_preview/${template.id}?t=${ts}`}
+        muted
+        playsInline
+        preload="metadata"
+        className="absolute inset-0 h-full w-full object-cover"
+        onError={() => setPreviewFailed(true)}
+      />
+    );
+  }
+  if (!thumbFailed) {
+    return (
+      <img
+        src={`/api/files/template_thumb/${template.id}`}
+        alt=""
+        className="absolute inset-0 h-full w-full object-cover"
+        onError={() => setThumbFailed(true)}
+      />
+    );
+  }
+  return (
+    <div className="absolute inset-0 flex items-center justify-center text-[10px] text-muted-foreground">
+      Pas d&apos;aperçu
     </div>
   );
 }
@@ -823,8 +939,10 @@ function PerVideoAssign({
 }: {
   videos: Pending[];
   allTemplates: Template[];
-  perVideoTpl: Record<string, number>;
-  setPerVideoTpl: React.Dispatch<React.SetStateAction<Record<string, number>>>;
+  perVideoTpl: Record<string, number[]>;
+  setPerVideoTpl: React.Dispatch<
+    React.SetStateAction<Record<string, number[]>>
+  >;
 }) {
   if (videos.length === 0) {
     return (
@@ -840,39 +958,88 @@ function PerVideoAssign({
       </p>
     );
   }
+
+  const toggle = (videoId: string, tplId: number) => {
+    setPerVideoTpl((prev) => {
+      const cur = prev[videoId] ?? [];
+      const next = cur.includes(tplId)
+        ? cur.filter((x) => x !== tplId)
+        : [...cur, tplId];
+      return { ...prev, [videoId]: next };
+    });
+  };
+  const setAll = (videoId: string) => {
+    setPerVideoTpl((prev) => ({
+      ...prev,
+      [videoId]: allTemplates.map((t) => t.id),
+    }));
+  };
+  const clearAll = (videoId: string) => {
+    setPerVideoTpl((prev) => ({ ...prev, [videoId]: [] }));
+  };
+
   return (
-    <div className="space-y-2">
-      {videos.map((v) => (
-        <div
-          key={v.id}
-          className="flex items-center gap-3 rounded-md border border-border bg-background/40 p-2.5 text-sm"
-        >
-          <div className="flex-1 truncate">
-            <div className="truncate font-medium">{v.name}</div>
-            <div className="text-xs text-muted-foreground">
-              {formatBytes(v.size)}
+    <div className="space-y-3">
+      {videos.map((v) => {
+        const picked = perVideoTpl[v.id] ?? [];
+        return (
+          <div
+            key={v.id}
+            className="rounded-md border border-border bg-background/40 p-3 text-sm"
+          >
+            <div className="mb-2 flex items-center gap-3">
+              <div className="flex-1 truncate">
+                <div className="truncate font-medium">{v.name}</div>
+                <div className="text-xs text-muted-foreground">
+                  {formatBytes(v.size)} · {picked.length} template
+                  {picked.length > 1 ? "s" : ""} sélectionné
+                  {picked.length > 1 ? "s" : ""}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setAll(v.id)}
+                  className="rounded-md border border-border px-2 py-1 transition hover:bg-accent/50"
+                >
+                  Tout
+                </button>
+                <button
+                  type="button"
+                  onClick={() => clearAll(v.id)}
+                  disabled={picked.length === 0}
+                  className="rounded-md border border-border px-2 py-1 transition hover:bg-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Aucun
+                </button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {allTemplates.map((t) => {
+                const on = picked.includes(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => toggle(v.id, t.id)}
+                    className={cn(
+                      "rounded-md border px-2 py-1 text-xs transition",
+                      on
+                        ? "border-primary bg-primary/15 text-primary"
+                        : "border-border bg-background/60 hover:border-ring",
+                    )}
+                  >
+                    {t.name}{" "}
+                    <span className="text-[10px] text-muted-foreground">
+                      ({t.language})
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
-          <Select
-            value={perVideoTpl[v.id]?.toString() ?? ""}
-            onValueChange={(value) => {
-              const num = Number(value);
-              setPerVideoTpl((prev) => ({ ...prev, [v.id]: num }));
-            }}
-          >
-            <SelectTrigger className="w-64">
-              <SelectValue placeholder="Choisir un template…" />
-            </SelectTrigger>
-            <SelectContent>
-              {allTemplates.map((t) => (
-                <SelectItem key={t.id} value={t.id.toString()}>
-                  {t.name} ({t.language})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -886,15 +1053,24 @@ function Step3Confirm({
   setSpoofEnabled,
   model,
   setModel,
+  showModelPicker,
+  setShowModelPicker,
   country,
   setCountry,
   language,
   setLanguage,
   dateWindow,
   setDateWindow,
+  generations,
+  setGenerations,
+  randomPasses,
+  setRandomPasses,
+  iphoneNaming,
+  setIphoneNaming,
   videoCount,
   templateCount,
   mode,
+  baseReelCount,
   reelCount,
   overLimit,
   error,
@@ -905,15 +1081,24 @@ function Step3Confirm({
   setSpoofEnabled: (b: boolean) => void;
   model: string;
   setModel: (s: string) => void;
+  showModelPicker: boolean;
+  setShowModelPicker: (b: boolean) => void;
   country: string;
   setCountry: (s: string) => void;
   language: string;
   setLanguage: (s: string) => void;
   dateWindow: number;
   setDateWindow: (n: number) => void;
+  generations: number;
+  setGenerations: (n: number) => void;
+  randomPasses: number;
+  setRandomPasses: (n: number) => void;
+  iphoneNaming: boolean;
+  setIphoneNaming: (b: boolean) => void;
   videoCount: number;
   templateCount: number;
   mode: WizardMode;
+  baseReelCount: number;
   reelCount: number;
   overLimit: boolean;
   error: string | null;
@@ -952,33 +1137,65 @@ function Step3Confirm({
           )}
         >
           <span>Spoofer les métadonnées (iPhone)</span>
-          <span className="text-muted-foreground">
-            {spoofEnabled ? "ON" : "OFF"}
-          </span>
+          <OnOffBadge enabled={spoofEnabled} />
         </button>
 
         {spoofEnabled && (
           <div className="space-y-3 rounded-md border border-border bg-card p-3">
+            {/* Modèle iPhone — défaut, "Changer" pour swap */}
+            <div className="space-y-1.5">
+              <div className="text-xs text-muted-foreground">Profil camera</div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-md border border-border bg-background px-2.5 py-1 text-[11px]">
+                  📱 {model}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowModelPicker(!showModelPicker)}
+                  className="text-[11px] text-muted-foreground underline transition hover:text-foreground"
+                >
+                  {showModelPicker ? "Replier" : "Changer"}
+                </button>
+              </div>
+              {showModelPicker && (
+                <div className="flex flex-wrap gap-1.5 rounded-md border border-border bg-background/40 p-2">
+                  {MODELS.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => {
+                        setModel(m);
+                        setShowModelPicker(false);
+                      }}
+                      className={cn(
+                        "rounded-md border px-2.5 py-1 text-[11px] transition",
+                        m === model
+                          ? "border-primary bg-accent"
+                          : "border-border hover:bg-accent/50",
+                      )}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
-              <SelectField
-                label="Profil camera"
-                value={model}
-                options={MODELS.map((m) => ({ value: m, label: m }))}
-                onChange={setModel}
-              />
               <SelectField
                 label="Pays"
                 value={country}
                 options={COUNTRIES}
                 onChange={setCountry}
               />
+              <SelectField
+                label="Langue"
+                value={language}
+                options={LANGUAGES.map((l) => ({ value: l, label: l }))}
+                onChange={setLanguage}
+              />
             </div>
-            <SelectField
-              label="Langue"
-              value={language}
-              options={LANGUAGES.map((l) => ({ value: l, label: l }))}
-              onChange={setLanguage}
-            />
+
             <label className="flex flex-col gap-1 text-xs">
               <span className="text-muted-foreground">
                 Date dans les {dateWindow} derniers jours
@@ -995,6 +1212,88 @@ function Step3Confirm({
             </label>
           </div>
         )}
+
+        {/* Phase 29 — Multiplicateur (Générations ou Random reroll) +
+            naming Apple iPhone. En mode "random" on affiche un slider
+            "Tirages random" qui re-shuffle l'attribution vidéo↔template
+            à chaque pass (mappings différents). En mode "all" /
+            "per-video" on affiche "Générations" qui duplique les mêmes
+            assignments avec metadata différentes. Mutually exclusive. */}
+        <div className="grid grid-cols-2 gap-3 rounded-md border border-border bg-card p-3">
+          {mode === "random" ? (
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="text-muted-foreground">
+                Tirages random : <strong>{randomPasses}</strong>
+                {randomPasses > 1 && (
+                  <span className="ml-1 text-[10px] text-primary">
+                    → {reelCount} reels (mappings différents)
+                  </span>
+                )}
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={Math.max(1, templateCount)}
+                step={1}
+                value={Math.min(randomPasses, Math.max(1, templateCount))}
+                onChange={(e) =>
+                  setRandomPasses(Number(e.target.value))
+                }
+                className="w-full accent-primary"
+              />
+              <span className="text-[10px] text-muted-foreground">
+                Chaque tirage = nouveau shuffle vidéo↔template. Sortie en{" "}
+                <code>Tirage N/</code> dans le ZIP. Max = nb templates
+                sélectionnés ({templateCount}).
+              </span>
+            </label>
+          ) : (
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="text-muted-foreground">
+                Nombre de générations : <strong>{generations}</strong>
+                {generations > 1 && (
+                  <span className="ml-1 text-[10px] text-primary">
+                    → {reelCount} reels au total
+                  </span>
+                )}
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={10}
+                step={1}
+                value={generations}
+                onChange={(e) => setGenerations(Number(e.target.value))}
+                className="w-full accent-primary"
+              />
+              <span className="text-[10px] text-muted-foreground">
+                {baseReelCount} base × {generations} = {reelCount} reel
+                {reelCount > 1 ? "s" : ""}, chacun avec EXIF différentes.
+              </span>
+            </label>
+          )}
+          <button
+            type="button"
+            onClick={() => setIphoneNaming(!iphoneNaming)}
+            className={cn(
+              "flex flex-col items-start justify-center gap-0.5 rounded-md border px-3 py-2 text-xs transition",
+              iphoneNaming
+                ? "border-primary bg-accent"
+                : "border-border bg-background hover:border-ring",
+            )}
+            title="Renomme les MP4 en IMG_xxxx.MOV (style iPhone)"
+          >
+            <span className="font-medium">
+              {iphoneNaming ? "📱 Naming Apple iPhone" : "Naming par défaut"}
+            </span>
+            <span className="text-[10px] text-muted-foreground">
+              {iphoneNaming
+                ? "IMG_xxxx.MOV, compteur continu"
+                : "Garde {nom_template}_{i}.mp4"}
+            </span>
+          </button>
+        </div>
+
       </div>
 
       <div className="rounded-md border border-border bg-card p-4 text-sm">
@@ -1025,11 +1324,29 @@ function Step3Confirm({
 
       {overLimit && (
         <p className="text-sm text-destructive">
-          Maximum 50 reels par batch — réduis le nombre de vidéos ou de templates.
+          Maximum 500 reels par batch — réduis le nombre de vidéos, de
+          templates ou de générations (ou lance en plusieurs batchs).
         </p>
       )}
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
+  );
+}
+
+/** Green/red ON-OFF pill, replaces the muted "ON"/"OFF" text on the
+ *  spoofing toggle. Same component as run-render-dialog. */
+function OnOffBadge({ enabled }: { enabled: boolean }) {
+  return (
+    <span
+      className={cn(
+        "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1",
+        enabled
+          ? "bg-emerald-500/20 text-emerald-300 ring-emerald-500/40"
+          : "bg-red-500/20 text-red-300 ring-red-500/40",
+      )}
+    >
+      {enabled ? "ON" : "OFF"}
+    </span>
   );
 }
 

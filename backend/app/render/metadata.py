@@ -22,6 +22,8 @@ from typing import Optional
 
 from mutagen.mp4 import MP4, MP4FreeForm
 
+from app.bin_finder import exiftool_exe
+
 log = logging.getLogger(__name__)
 
 COUNTRIES_PATH = Path(__file__).parent / "countries.json"
@@ -82,13 +84,16 @@ def _ff(value: str) -> MP4FreeForm:
 
 
 def write_mp4_atoms(filepath: Path, *, model: str, creation_iso: str, iso6709: str) -> None:
+    # mutagen >= 1.45 expects freeform keys in `----:MEAN:NAME` form
+    # (colon separator between the iTunes-style mean namespace and the
+    # atom name). Earlier versions tolerated dots; current does not.
     mp4 = MP4(filepath)
-    mp4["----:com.apple.quicktime.make"] = _ff("Apple")
-    mp4["----:com.apple.quicktime.model"] = _ff(model)
-    mp4["----:com.apple.quicktime.software"] = _ff(SOFTWARE_VERSION)
-    mp4["----:com.apple.quicktime.creationdate"] = _ff(creation_iso)
-    mp4["----:com.apple.quicktime.location.ISO6709"] = _ff(iso6709)
-    mp4["----:com.apple.quicktime.location.accuracy.horizontal"] = _ff("5.000000")
+    mp4["----:com.apple.quicktime:make"] = _ff("Apple")
+    mp4["----:com.apple.quicktime:model"] = _ff(model)
+    mp4["----:com.apple.quicktime:software"] = _ff(SOFTWARE_VERSION)
+    mp4["----:com.apple.quicktime:creationdate"] = _ff(creation_iso)
+    mp4["----:com.apple.quicktime:location.ISO6709"] = _ff(iso6709)
+    mp4["----:com.apple.quicktime:location.accuracy.horizontal"] = _ff("5.000000")
     mp4.save()
 
 
@@ -108,7 +113,7 @@ def write_exiftool(
     creation_exif: str,
 ) -> None:
     args: list[str] = [
-        "exiftool",
+        exiftool_exe(),
         "-overwrite_original",
         "-q",
         "-q",
@@ -138,7 +143,17 @@ def write_exiftool(
         f"-MediaModifyDate={creation_exif}",
         str(filepath),
     ]
-    result = subprocess.run(args, capture_output=True, text=True)
+    try:
+        result = subprocess.run(args, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        # Windows: WinError 2 → exiftool.exe missing from PATH.
+        raise RuntimeError(
+            "exiftool n'est pas installé ou pas dans le PATH. "
+            "Installe-le : Windows `scoop install exiftool` · "
+            "macOS `brew install exiftool` · "
+            "Linux `apt install libimage-exiftool-perl`"
+        ) from exc
+
     if result.returncode != 0:
         log.warning(
             "exiftool returned %s on %s. stderr=%s",

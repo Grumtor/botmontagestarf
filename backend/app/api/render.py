@@ -34,8 +34,8 @@ from app.db import get_db
 from app.db.models import Template
 from app.render.batch_runner import gather_render_inputs, run_render
 from app.storage import (
-    PLACEHOLDER_PREVIEW_PATH,
     TEMP_DIR,
+    placeholder_fallback_path,
     template_preview_path,
 )
 
@@ -101,7 +101,8 @@ def render_preview(
     db: Session = Depends(get_db),
 ) -> FileResponse:
     """Render a single preview MP4 for one template + given fills.
-    Lower quality (CRF 28, ultrafast) than batch outputs."""
+    Same quality settings as production batch renders (CRF 18, preset slow)
+    so the card preview matches what gets exported."""
     template = db.get(Template, payload.template_id)
     if template is None:
         raise HTTPException(404, "Template not found")
@@ -117,15 +118,15 @@ def render_preview(
             db,
             template,
             fills,
-            fill_missing_placeholders_with=PLACEHOLDER_PREVIEW_PATH,
+            fill_missing_placeholders_with=placeholder_fallback_path(),
         )
         run_render(
             template=template,
             ctx=ctx,
             output_path=output_path,
-            crf=28,
-            preset="ultrafast",
-            timeout=180,
+            crf=18,
+            preset="slow",
+            timeout=600,
         )
     except Exception as e:
         output_path.unlink(missing_ok=True)

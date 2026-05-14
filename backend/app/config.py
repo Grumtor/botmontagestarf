@@ -1,21 +1,33 @@
+"""Local-only config. No env required to run — everything has a sensible
+default for a single-machine setup. Override via env vars or a `.env` next
+to the backend if you really want to."""
+
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# Default data root: <repo>/data/ (gitignored). Created at boot if missing.
+_DEFAULT_DATA_DIR = (Path(__file__).resolve().parents[2] / "data").as_posix()
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    database_url: str = "postgresql+psycopg2://botmontage:botmontage@localhost:5432/botmontage"
-    redis_url: str = "redis://localhost:6379/0"
+    # Single SQLite file inside data_dir; WAL mode set at startup so the
+    # render worker can write while the API reads.
+    data_dir: str = _DEFAULT_DATA_DIR
 
-    celery_broker_url: str = "redis://localhost:6379/0"
-    celery_result_backend: str = "redis://localhost:6379/1"
-
-    backend_password: str = "changeme"
-    jwt_secret: str = "dev-secret-change-me"
-    jwt_algorithm: str = "HS256"
-    jwt_expire_hours: int = 168  # 7 days
-
+    # Allow CORS for the local Next dev server. Add more origins via comma
+    # separation if you ever expose through a tunnel.
     cors_origins: str = "http://localhost:3000"
+
+    # Worker concurrency for the in-process render queue.
+    render_workers: int = 1
+
+    @property
+    def database_url(self) -> str:
+        return f"sqlite:///{self.data_dir}/botmontage.db"
 
     @property
     def cors_origins_list(self) -> list[str]:

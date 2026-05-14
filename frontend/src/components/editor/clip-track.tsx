@@ -17,6 +17,10 @@ type Props = {
   pxPerSec: number;
   width: number;
   height: number;
+  /** Phase 28d — global timeline snap points (clip boundaries main +
+   *  extras + playhead + 0/total). Used during edge trim so the user
+   *  can resize a placeholder to align with a Track 2 clip start. */
+  snapPoints?: number[];
 };
 
 /**
@@ -27,7 +31,7 @@ type Props = {
  * Files dropped from the desktop directly onto the track are uploaded as
  * fixed clips and appended to the timeline.
  */
-export function ClipTrack({ pxPerSec, width, height }: Props) {
+export function ClipTrack({ pxPerSec, width, height, snapPoints }: Props) {
   const template = useEditorStore((s) => s.template);
   const clips = useEditorStore((s) => s.clips);
   const selectedClipId = useEditorStore((s) => s.selectedClipId);
@@ -42,6 +46,23 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
 
   const starts = clipStartTimes(clips);
 
+  // Phase 28d — snap helper using the global snapPoints from parent.
+  // Threshold ~10px en distance écran, converti en secondes via pxPerSec.
+  const snapThresholdSec = 10 / Math.max(1, pxPerSec);
+  function snapAbsTime(t: number): number {
+    if (!snapPoints || snapPoints.length === 0) return t;
+    let best = t;
+    let bestD = snapThresholdSec;
+    for (const p of snapPoints) {
+      const d = Math.abs(t - p);
+      if (d < bestD) {
+        bestD = d;
+        best = p;
+      }
+    }
+    return best;
+  }
+
   function startTrim(
     e: React.MouseEvent,
     clipIdx: number,
@@ -52,15 +73,18 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
     const clip = clips[clipIdx];
     setSelected(clip.id);
     const startX = e.clientX;
+    const clipAbsStart = starts[clipIdx];
 
     function onMove(ev: MouseEvent) {
       const dt = (ev.clientX - startX) / pxPerSec;
 
       if (clip.type === "placeholder" || clip.type === "image") {
         if (edge === "right") {
-          patchClip(clip.id, {
-            duration_sec: Math.max(0.1, clip.duration_sec + dt),
-          });
+          // New clip duration → new absolute end. Snap absolute end.
+          const newDurRaw = Math.max(0.1, clip.duration_sec + dt);
+          const snappedEnd = snapAbsTime(clipAbsStart + newDurRaw);
+          const newDur = Math.max(0.1, snappedEnd - clipAbsStart);
+          patchClip(clip.id, { duration_sec: newDur });
         }
         // left edge: noop (no in-source time for placeholders/images).
         return;
@@ -70,9 +94,19 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
       if (edge === "right") {
         const maxOut = clip.source_duration_sec ?? Infinity;
         const initOut = clip.trim_out ?? clip.source_duration_sec ?? 0;
-        patchClip(clip.id, {
-          trim_out: Math.max(clip.trim_in + 0.1, Math.min(maxOut, initOut + dt)),
-        });
+        const proposedTrimOut = Math.max(
+          clip.trim_in + 0.1,
+          Math.min(maxOut, initOut + dt),
+        );
+        // Convert trim_out to ABSOLUTE timeline end, snap, convert back.
+        const absEndRaw =
+          clipAbsStart + (proposedTrimOut - clip.trim_in);
+        const snappedAbsEnd = snapAbsTime(absEndRaw);
+        const newTrimOut = Math.max(
+          clip.trim_in + 0.1,
+          Math.min(maxOut, clip.trim_in + (snappedAbsEnd - clipAbsStart)),
+        );
+        patchClip(clip.id, { trim_out: newTrimOut });
       } else {
         const initIn = clip.trim_in;
         const maxIn = (clip.trim_out ?? clip.source_duration_sec ?? 0) - 0.1;
@@ -150,10 +184,17 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
         const isFixed = clip.type === "fixed";
         const isSelected = clip.id === selectedClipId;
 
+        // Phase 27 — for fixed videos, prefer the wide filmstrip (multiple
+        // frames tiled horizontally) over the single thumbnail. The
+        // browser falls back to the single thumb if the strip endpoint
+        // 404s (older clips). Image clips keep using the single thumb
+        // (a static image).
         const thumbUrl =
-          template && (isFixed || isImage)
-            ? `/api/files/template_clip_thumb/${template.id}/${clip.file_id}`
-            : null;
+          template && isFixed
+            ? `/api/files/template_clip_strip/${template.id}/${clip.file_id}`
+            : template && isImage
+              ? `/api/files/template_clip_thumb/${template.id}/${clip.file_id}`
+              : null;
 
         return (
           <div
@@ -183,7 +224,7 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
                 ? "border-dashed border-yellow-500/70 bg-yellow-700/30"
                 : isImage
                   ? "border-solid border-transparent bg-emerald-700/80 hover:bg-emerald-600/80"
-                  : "border-solid border-transparent bg-sky-700/80 hover:bg-sky-600/80",
+                  : "border-solid border-transparent bg-violet-700/80 hover:bg-violet-600/80",
               isSelected && "border-foreground shadow-lg",
             )}
             style={{
@@ -191,8 +232,14 @@ export function ClipTrack({ pxPerSec, width, height }: Props) {
               width: w,
               height: "calc(100% - 8px)",
               backgroundImage: thumbUrl ? `url(${thumbUrl})` : undefined,
-              backgroundSize: isImage ? "cover" : "auto 100%",
-              backgroundRepeat: isImage ? "no-repeat" : "repeat-x",
+              // Phase 27 — filmstrip stretched 100% horizontally so each
+              // frame slot lines up with its time position on the clip.
+              backgroundSize: isFixed
+                ? "100% 100%"
+                : isImage
+                  ? "cover"
+                  : "auto 100%",
+              backgroundRepeat: "no-repeat",
               backgroundPosition: "center",
             }}
             title={

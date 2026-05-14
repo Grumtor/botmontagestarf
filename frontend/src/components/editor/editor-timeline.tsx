@@ -11,16 +11,18 @@ import {
   clipDuration,
   clipStartTimes,
   formatTime,
-  totalDuration,
+  timelineDuration,
 } from "@/lib/editor-types";
 import { cn } from "@/lib/utils";
 import type { Layer } from "@/lib/api";
 import { ClipTrack } from "./clip-track";
+import { ExtraTrackLane } from "./extra-track-lane";
 import { OverlayAudioLane } from "./audio-tracks";
 import { TimelineActionBar } from "./timeline-action-bar";
 
 const RULER_HEIGHT = 28;
 const CLIP_TRACK_HEIGHT = 70;
+const EXTRA_TRACK_HEIGHT = 56;
 const AUDIO_TRACK_HEIGHT = 50;
 const LAYER_TRACK_HEIGHT = 40;
 const TRACK_GAP = 6;
@@ -32,13 +34,20 @@ const MIN_LAYER_DURATION = 0.1;
 export function EditorTimeline() {
   const layers = useEditorStore((s) => s.layers);
   const clips = useEditorStore((s) => s.clips);
+  const extraTracks = useEditorStore((s) => s.extraTracks);
   const currentTime = useEditorStore((s) => s.currentTime);
   const setCurrentTime = useEditorStore((s) => s.setCurrentTime);
   const selectedLayerId = useEditorStore((s) => s.selectedLayerId);
   const setSelected = useEditorStore((s) => s.setSelectedLayerId);
   const patchLayer = useEditorStore((s) => s.patchLayer);
 
-  const duration = Math.max(1, totalDuration(clips));
+  // Phase 28 — la timeline s'étend désormais à la track/layer le plus
+  // long, pas juste la main track. Comme ça si Track 2 fait 8s alors
+  // que la main fait 6s, le ruler va jusqu'à 8s et l'user voit tout.
+  const duration = Math.max(
+    1,
+    timelineDuration({ clips, extraTracks, layers }),
+  );
   const [pxPerSec, setPxPerSec] = useState(60);
   const [audioOpen, setAudioOpen] = useState(true);
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -59,17 +68,33 @@ export function EditorTimeline() {
   const tracksWidth = Math.max(duration * pxPerSec, 200);
   const layerTracks = [...layers].reverse();
 
-  // Snap points = each clip's start + each clip's end + 0 + total duration + playhead.
+  // Snap points = chaque bord de clip (main + extras) + 0 + total + playhead.
+  // Phase 28d — les bords des clips d'extra tracks sont aussi snappables
+  // depuis la main track et inversement, donc resize/move s'aligne
+  // proprement entre les pistes.
   const starts = clipStartTimes(clips);
   const snapPoints: number[] = [0, duration, currentTime];
   starts.forEach((s, i) => {
     snapPoints.push(s);
     snapPoints.push(s + clipDuration(clips[i]));
   });
+  for (const t of extraTracks) {
+    for (const c of t.clips) {
+      const dur =
+        c.type === "fixed"
+          ? c.trim_out != null
+            ? Math.max(0, c.trim_out - c.trim_in)
+            : Math.max(0, (c.source_duration_sec ?? 0) - c.trim_in)
+          : Math.max(0, c.duration_sec);
+      snapPoints.push(c.start_time);
+      snapPoints.push(c.start_time + dur);
+    }
+  }
   const audioH = audioOpen ? AUDIO_TRACK_HEIGHT : 0;
   const totalTracksHeight =
     CLIP_TRACK_HEIGHT +
     TRACK_GAP +
+    extraTracks.length * (EXTRA_TRACK_HEIGHT + TRACK_GAP) +
     audioH +
     (audioOpen ? TRACK_GAP : 0) +
     layerTracks.length * (LAYER_TRACK_HEIGHT + TRACK_GAP);
@@ -116,6 +141,14 @@ export function EditorTimeline() {
             <span className="font-mono">{Math.round(pxPerSec)} px/s</span>
           </div>
           <TrackLabel label="Vidéo" height={CLIP_TRACK_HEIGHT + TRACK_GAP} />
+          {extraTracks.map((t, i) => (
+            <TrackLabel
+              key={t.id}
+              label={`${t.name || `Track ${i + 2}`}`}
+              color="rgba(99, 102, 241, 0.9)"
+              height={EXTRA_TRACK_HEIGHT + TRACK_GAP}
+            />
+          ))}
           <button
             type="button"
             onClick={() => setAudioOpen((v) => !v)}
@@ -167,8 +200,23 @@ export function EditorTimeline() {
                   pxPerSec={pxPerSec}
                   width={tracksWidth}
                   height={CLIP_TRACK_HEIGHT}
+                  snapPoints={snapPoints}
                 />
               </div>
+              {/* Phase 26b — extra video tracks. Index 0 = first extra
+                  (just above main), last index = top priority. */}
+              {extraTracks.map((track, i) => (
+                <div key={track.id} style={{ marginBottom: TRACK_GAP }}>
+                  <ExtraTrackLane
+                    track={track}
+                    trackIndex={i}
+                    pxPerSec={pxPerSec}
+                    width={tracksWidth}
+                    height={EXTRA_TRACK_HEIGHT}
+                    snapPoints={snapPoints}
+                  />
+                </div>
+              ))}
               {audioOpen && (
                 <div style={{ marginBottom: TRACK_GAP }}>
                   <OverlayAudioLane
@@ -184,19 +232,31 @@ export function EditorTimeline() {
                   style={{ width: tracksWidth, height: 24, marginBottom: TRACK_GAP }}
                 />
               )}
-              {layerTracks.map((layer) => (
-                <LayerLane
-                  key={layer.id}
-                  layer={layer}
-                  duration={duration}
-                  pxPerSec={pxPerSec}
-                  width={tracksWidth}
-                  selected={layer.id === selectedLayerId}
-                  onSelect={() => setSelected(layer.id)}
-                  onPatch={(p) => patchLayer(layer.id, p)}
-                  snapPoints={snapPoints}
-                />
-              ))}
+              {layerTracks.map((layer) => {
+                // Phase 26a — snap inter-layer : on ajoute aux snapPoints
+                // les bords (start_time, end_time) de TOUS les autres
+                // layers. Self est exclu pour ne pas s'aimanter à
+                // soi-même (sinon le layer ne bougerait plus).
+                const otherLayerEdges: number[] = [];
+                for (const other of layers) {
+                  if (other.id === layer.id) continue;
+                  otherLayerEdges.push(other.start_time);
+                  otherLayerEdges.push(other.end_time);
+                }
+                return (
+                  <LayerLane
+                    key={layer.id}
+                    layer={layer}
+                    duration={duration}
+                    pxPerSec={pxPerSec}
+                    width={tracksWidth}
+                    selected={layer.id === selectedLayerId}
+                    onSelect={() => setSelected(layer.id)}
+                    onPatch={(p) => patchLayer(layer.id, p)}
+                    snapPoints={[...snapPoints, ...otherLayerEdges]}
+                  />
+                );
+              })}
             </div>
 
             <div

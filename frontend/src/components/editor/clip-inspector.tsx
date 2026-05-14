@@ -1,33 +1,215 @@
 "use client";
 
-import { Trash2, Volume2, VolumeX } from "lucide-react";
+import { useState } from "react";
+import {
+  Eye,
+  EyeOff,
+  Loader2,
+  Music2,
+  Scissors,
+  Trash2,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useEditorStore } from "@/store/editor";
-import type { Clip } from "@/lib/api";
+import { Templates, type Clip, type ExtraClip } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-type Props = { clip: Clip };
+type Props = {
+  clip: Clip | ExtraClip;
+  /** When set, this clip lives on an extra track — use extra-track
+   *  store actions instead of the main-track ones. */
+  extraTrackId?: string;
+};
 
-export function ClipInspector({ clip }: Props) {
-  const patchClip = useEditorStore((s) => s.patchClip);
-  const deleteClip = useEditorStore((s) => s.deleteClip);
+export function ClipInspector({ clip, extraTrackId }: Props) {
+  const template = useEditorStore((s) => s.template);
+  const clips = useEditorStore((s) => s.clips);
+  const currentTime = useEditorStore((s) => s.currentTime);
+  const patchMainClip = useEditorStore((s) => s.patchClip);
+  const deleteMainClip = useEditorStore((s) => s.deleteClip);
+  const splitMainClip = useEditorStore((s) => s.splitMainClip);
+  const splitExtraClipStore = useEditorStore((s) => s.splitExtraClip);
+  const patchExtraClipStore = useEditorStore((s) => s.patchExtraClip);
+  const deleteExtraClip = useEditorStore((s) => s.deleteExtraClip);
+  const patchAudioOverlay = useEditorStore((s) => s.patchAudioOverlay);
+
+  const isExtra = !!extraTrackId;
+  // Polymorphic patch / delete depending on whether this clip is on the
+  // main track or on an extra track.
+  const patchClip = isExtra
+    ? (id: string, patch: Partial<Clip> | Partial<ExtraClip>) =>
+        patchExtraClipStore(extraTrackId!, id, patch as Partial<ExtraClip>)
+    : (id: string, patch: Partial<Clip>) =>
+        patchMainClip(id, patch);
+  const deleteClip = isExtra
+    ? (id: string) => deleteExtraClip(extraTrackId!, id)
+    : (id: string) => deleteMainClip(id);
+
+  const [extractingAudio, setExtractingAudio] = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
+
+  async function onUseAsOverlay() {
+    if (!template || clip.type !== "fixed") return;
+    setExtractingAudio(true);
+    setExtractError(null);
+    try {
+      const updated = await Templates.useClipAudioAsOverlay(
+        template.id,
+        clip.id,
+      );
+      // Mirror server state into the editor store (no full reload, so the
+      // user's other unsaved edits in this session aren't clobbered).
+      patchAudioOverlay({
+        file_id: updated.audio_overlay.file_id,
+        volume: updated.audio_overlay.volume,
+        start_offset: updated.audio_overlay.start_offset,
+        trim_in: updated.audio_overlay.trim_in,
+      });
+      // For extra-track clips, also set video_enabled=false so the
+      // underlying tracks stay visible (full "audio-only" mode).
+      if (extraTrackId) {
+        patchClip(clip.id, {
+          audio_enabled: false,
+          video_enabled: false,
+        } as Partial<ExtraClip>);
+      } else {
+        patchClip(clip.id, { audio_enabled: false });
+      }
+    } catch (err) {
+      setExtractError(err instanceof Error ? err.message : "Erreur");
+    } finally {
+      setExtractingAudio(false);
+    }
+  }
 
   const isFixed = clip.type === "fixed";
   const isPlaceholder = clip.type === "placeholder";
   const isImage = clip.type === "image";
 
+  // Phase 27 — compute the clip's absolute time range on the timeline
+  // and whether the playhead is inside it (for the "Cut at playhead"
+  // button enable/disable).
+  const clipDur =
+    clip.type === "fixed"
+      ? clip.trim_out != null
+        ? Math.max(0, clip.trim_out - clip.trim_in)
+        : Math.max(0, ((clip as Clip & { source_duration_sec?: number }).source_duration_sec ?? 0) - clip.trim_in)
+      : (clip as { duration_sec: number }).duration_sec;
+
+  let clipAbsStart = 0;
+  if (isExtra) {
+    clipAbsStart = (clip as ExtraClip).start_time;
+  } else {
+    // Sum durations of main-track clips before this one.
+    for (const c of clips) {
+      if (c.id === clip.id) break;
+      if (c.type === "fixed") {
+        clipAbsStart +=
+          c.trim_out != null
+            ? Math.max(0, c.trim_out - c.trim_in)
+            : Math.max(0, (c.source_duration_sec ?? 0) - c.trim_in);
+      } else {
+        clipAbsStart += c.duration_sec;
+      }
+    }
+  }
+  const clipAbsEnd = clipAbsStart + clipDur;
+  const playheadInClip =
+    currentTime > clipAbsStart + 0.05 && currentTime < clipAbsEnd - 0.05;
+  const localPlayheadOffset = currentTime - clipAbsStart;
+
+  function onCutAtPlayhead() {
+    if (!playheadInClip) return;
+    if (isExtra && extraTrackId) {
+      splitExtraClipStore(extraTrackId, clip.id, currentTime);
+    } else {
+      splitMainClip(clip.id, currentTime);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div>
         <div className="text-xs uppercase tracking-wider text-muted-foreground">
-          Type
+          Type {isExtra && "· extra track"}
         </div>
         <div className="text-sm font-medium">
           {isFixed ? "Vidéo fixe" : isImage ? "Image fixe" : "Placeholder"}
         </div>
       </div>
+
+      {/* Extra-track clips have an absolute start_time on the timeline. */}
+      {isExtra && (
+        <Section title="Position (s)">
+          <NumberField
+            label="Début (timeline)"
+            value={(clip as ExtraClip).start_time}
+            step={0.1}
+            onChange={(v) =>
+              patchClip(clip.id, { start_time: Math.max(0, v) } as Partial<
+                ExtraClip
+              >)
+            }
+          />
+          <p className="text-[10px] text-muted-foreground">
+            Position absolue du clip sur la timeline globale.
+          </p>
+        </Section>
+      )}
+
+      {/* Phase 28 — visibility toggle pour les clips d'extra tracks.
+          Quand "Audio only" est ON, le clip ne s'affiche plus
+          visuellement (les tracks en-dessous restent visibles) mais
+          son audio continue à être mixé. Use case classique : pull
+          uniquement la bande son d'une vidéo. */}
+      {isExtra && !isImage && (
+        <Section title="Visibilité">
+          <button
+            type="button"
+            onClick={() =>
+              patchClip(clip.id, {
+                video_enabled: !(
+                  (clip as ExtraClip).video_enabled ?? true
+                ),
+              } as Partial<ExtraClip>)
+            }
+            className={cn(
+              "flex w-full items-center justify-between rounded-md border px-3 py-2 text-xs transition",
+              ((clip as ExtraClip).video_enabled ?? true)
+                ? "border-primary bg-accent"
+                : "border-amber-500/50 bg-amber-500/10 text-amber-200",
+            )}
+            title={
+              ((clip as ExtraClip).video_enabled ?? true)
+                ? "Désactiver l'image de ce clip (audio only — les tracks en-dessous restent visibles)"
+                : "Réactiver l'image de ce clip"
+            }
+          >
+            <span className="flex items-center gap-2">
+              {((clip as ExtraClip).video_enabled ?? true) ? (
+                <Eye className="h-3 w-3" />
+              ) : (
+                <EyeOff className="h-3 w-3" />
+              )}
+              {((clip as ExtraClip).video_enabled ?? true)
+                ? "Image affichée"
+                : "🎵 Audio only — image masquée"}
+            </span>
+            <span className="text-muted-foreground">
+              {((clip as ExtraClip).video_enabled ?? true) ? "ON" : "OFF"}
+            </span>
+          </button>
+          <p className="text-[10px] leading-snug text-muted-foreground">
+            Mode «&nbsp;Audio only&nbsp;» : utile pour récupérer
+            uniquement la bande son d&apos;un clip Track {extraTrackId ? "" : ""}
+            sans qu&apos;il couvre le visuel des tracks en-dessous.
+          </p>
+        </Section>
+      )}
 
       {isFixed && (
         <Section title="Trim (s)">
@@ -133,8 +315,77 @@ export function ClipInspector({ clip }: Props) {
             />
           </label>
         )}
+
+        {/* Phase 25 (B) + 28c — extraire l'audio de ce clip vidéo et le
+            set comme audio overlay global. Sur main track : mute auto
+            l'audio du clip. Sur extra track : mute audio + désactive
+            l'image (full audio-only) pour que la main track reste
+            visible. */}
+        {isFixed && (
+          <div className="space-y-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={onUseAsOverlay}
+              disabled={extractingAudio}
+              title="Extraire l'audio de cette vidéo et l'utiliser comme audio overlay du template (le clip sera muté automatiquement)"
+            >
+              {extractingAudio ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Extraction…
+                </>
+              ) : (
+                <>
+                  <Music2 className="h-4 w-4" />
+                  {isExtra
+                    ? "Utiliser comme bande son du template"
+                    : "Utiliser comme audio overlay"}
+                </>
+              )}
+            </Button>
+            <p className="text-[10px] leading-snug text-muted-foreground">
+              {isExtra
+                ? "Extrait l'audio de ce clip et l'utilise pour TOUTE la template (joue de t=0 à la fin). L'image du clip est masquée et son audio coupé pour pas faire doublon — les tracks en-dessous restent visibles."
+                : "Pratique si tu veux que la bande son joue dès le début du template (pendant ton placeholder par exemple) et que l'audio du clip ne se dédouble pas."}
+            </p>
+            {extractError && (
+              <p className="text-[10px] text-destructive">{extractError}</p>
+            )}
+          </div>
+        )}
         </Section>
       )}
+
+      {/* Phase 27 — Couper au playhead. Le bouton est toujours visible
+          mais désactivé si le playhead n'est pas dans la zone du clip,
+          avec un texte d'aide explicite. */}
+      <div className="space-y-1">
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full"
+          onClick={onCutAtPlayhead}
+          disabled={!playheadInClip}
+          title={
+            playheadInClip
+              ? `Couper en deux à ${localPlayheadOffset.toFixed(2)}s du début du clip`
+              : "Place le playhead dans la zone du clip pour couper"
+          }
+        >
+          <Scissors className="h-4 w-4" />
+          {playheadInClip
+            ? `Couper ici (${localPlayheadOffset.toFixed(2)}s)`
+            : "Couper au playhead"}
+        </Button>
+        {!playheadInClip && (
+          <p className="text-[10px] leading-snug text-muted-foreground">
+            Glisse la barre de lecture (rouge) sur le clip pour activer la
+            coupe.
+          </p>
+        )}
+      </div>
 
       <Button
         variant="destructive"

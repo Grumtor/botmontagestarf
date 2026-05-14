@@ -14,6 +14,7 @@ export const LAYER_TYPES: { type: LayerType; label: string }[] = [
   { type: "image", label: "Image" },
   { type: "gif", label: "GIF" },
   { type: "emoji", label: "Emoji" },
+  { type: "snap", label: "Snap" },
 ];
 
 export const LAYER_LABELS: Record<LayerType, string> = LAYER_TYPES.reduce(
@@ -22,30 +23,67 @@ export const LAYER_LABELS: Record<LayerType, string> = LAYER_TYPES.reduce(
 );
 
 export const LAYER_COLORS: Record<LayerType, string> = {
-  text: "rgba(59, 130, 246, 0.55)",
-  image: "rgba(34, 197, 94, 0.55)",
-  gif: "rgba(168, 85, 247, 0.55)",
-  emoji: "rgba(234, 179, 8, 0.55)",
+  text: "rgba(59, 130, 246, 0.55)",      // bleu
+  image: "rgba(34, 197, 94, 0.55)",      // vert
+  gif: "rgba(236, 72, 153, 0.55)",       // rose
+  emoji: "rgba(249, 115, 22, 0.55)",     // orange
+  snap: "rgba(250, 204, 21, 0.55)",      // Snapchat yellow
+};
+
+// ===== clip color palette (Phase 26c) =================================
+//
+// Consistent colors across the main track, extra tracks, and the
+// inspector. Tailwind class strings — keep in sync with how they're used
+// (bg-* / border-* / text-*).
+export const CLIP_COLORS = {
+  fixed: {
+    bg: "bg-violet-700/80",
+    hover: "hover:bg-violet-600/80",
+    chip: "bg-violet-500/90",
+  },
+  image: {
+    bg: "bg-emerald-700/80",
+    hover: "hover:bg-emerald-600/80",
+    chip: "bg-emerald-500/90",
+  },
+  placeholder: {
+    bg: "bg-yellow-700/30",
+    border: "border-dashed border-yellow-500/70",
+    chip: "bg-yellow-500/90",
+  },
 };
 
 export function defaultLayerData(type: LayerType): Record<string, unknown> {
   if (type === "text") {
+    // Defaults choisis par le user (Phase 25) : Montserrat Bold + contour
+    // 3px + saut de ligne serré style Insta. Tous les autres champs gardent
+    // leurs valeurs neutres legacy.
     return {
       text: "Texte",
-      font_id: "inter",
+      font_id: "montserrat_bold",
       font_size_pct: 5,
       color: "#FFFFFF",
       align: "center",
-      style: "plain",
+      style: "stroke",
       highlight_color: "#FFEB3B",
       highlight_padding: 6,
       stroke_color: "#000000",
-      stroke_width: 4,
+      stroke_width: 3,
       max_width_pct: 80,
-      line_height: 1.2,
+      line_height: 0.95,
       letter_spacing: 0,
       bold: false,
       italic: false,
+    };
+  }
+  if (type === "snap") {
+    return {
+      filter_type: "snap",
+      text: "Tape ton snap ici",
+      text_pool: [],
+      font_size_px: 36,
+      y_pct_min: 45,
+      y_pct_max: 55,
     };
   }
   // image / gif / emoji default — file_id null until user uploads
@@ -71,6 +109,36 @@ export function clipDuration(clip: Clip): number {
 
 export function totalDuration(clips: Clip[]): number {
   return clips.reduce((s, c) => s + clipDuration(c), 0);
+}
+
+/** Phase 28 — total duration considering all tracks (main + extras +
+ *  layers + audio overlay). Used to size the timeline so the user sees
+ *  EVERYTHING that exists, not just the main track. */
+export function timelineDuration(opts: {
+  clips: Clip[];
+  extraTracks?: { clips: { type: "fixed" | "image" | "placeholder";
+    start_time: number; trim_in: number; trim_out: number | null;
+    duration_sec?: number; source_duration_sec?: number | null;
+  }[] }[];
+  layers?: { end_time: number }[];
+}): number {
+  let max = totalDuration(opts.clips);
+  for (const t of opts.extraTracks ?? []) {
+    for (const c of t.clips) {
+      const dur =
+        c.type === "fixed"
+          ? c.trim_out != null
+            ? Math.max(0, c.trim_out - c.trim_in)
+            : Math.max(0, (c.source_duration_sec ?? 0) - c.trim_in)
+          : Math.max(0, c.duration_sec ?? 0);
+      const end = c.start_time + dur;
+      if (end > max) max = end;
+    }
+  }
+  for (const l of opts.layers ?? []) {
+    if (l.end_time > max) max = l.end_time;
+  }
+  return max;
 }
 
 export function clipStartTimes(clips: Clip[]): number[] {

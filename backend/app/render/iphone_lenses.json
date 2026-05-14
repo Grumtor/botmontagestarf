@@ -1,0 +1,63 @@
+{
+  "_doc": "Per-iPhone lens specs used for credible EXIF metadata. Each model lists its lenses with focal length (35mm-equiv), aperture range, sensor focal length (real, used for FocalLength tag), and a typical lens label as seen in iOS photos. iso_min/iso_max bound the random ISO. shutter_min_us/shutter_max_us bound ExposureTime in microseconds.",
+  "iPhone 16": {
+    "lenses": [
+      { "label": "iPhone 16 back dual camera 4.95mm f/1.6", "focal_real": 4.95, "focal_35mm": 26, "aperture": 1.6 },
+      { "label": "iPhone 16 back dual camera 1.54mm f/2.2", "focal_real": 1.54, "focal_35mm": 13, "aperture": 2.2 }
+    ],
+    "iso_min": 32, "iso_max": 1600,
+    "shutter_min_us": 1000, "shutter_max_us": 33333
+  },
+  "iPhone 16 Plus": {
+    "lenses": [
+      { "label": "iPhone 16 Plus back dual camera 4.95mm f/1.6", "focal_real": 4.95, "focal_35mm": 26, "aperture": 1.6 },
+      { "label": "iPhone 16 Plus back dual camera 1.54mm f/2.2", "focal_real": 1.54, "focal_35mm": 13, "aperture": 2.2 }
+    ],
+    "iso_min": 32, "iso_max": 1600,
+    "shutter_min_us": 1000, "shutter_max_us": 33333
+  },
+  "iPhone 16 Pro": {
+    "lenses": [
+      { "label": "iPhone 16 Pro back triple camera 6.86mm f/1.78", "focal_real": 6.86, "focal_35mm": 24, "aperture": 1.78 },
+      { "label": "iPhone 16 Pro back triple camera 2.22mm f/2.2", "focal_real": 2.22, "focal_35mm": 13, "aperture": 2.2 },
+      { "label": "iPhone 16 Pro back triple camera 9mm f/2.8", "focal_real": 9.0, "focal_35mm": 120, "aperture": 2.8 }
+    ],
+    "iso_min": 24, "iso_max": 3200,
+    "shutter_min_us": 1000, "shutter_max_us": 33333
+  },
+  "iPhone 16 Pro Max": {
+    "lenses": [
+      { "label": "iPhone 16 Pro Max back triple camera 6.86mm f/1.78", "focal_real": 6.86, "focal_35mm": 24, "aperture": 1.78 },
+      { "label": "iPhone 16 Pro Max back triple camera 2.22mm f/2.2", "focal_real": 2.22, "focal_35mm": 13, "aperture": 2.2 },
+      { "label": "iPhone 16 Pro Max back triple camera 9mm f/2.8", "focal_real": 9.0, "focal_35mm": 120, "aperture": 2.8 }
+    ],
+    "iso_min": 24, "iso_max": 3200,
+    "shutter_min_us": 1000, "shutter_max_us": 33333
+  },
+  "iPhone 17": {
+    "lenses": [
+      { "label": "iPhone 17 back dual camera 5.1mm f/1.6", "focal_real": 5.1, "focal_35mm": 26, "aperture": 1.6 },
+      { "label": "iPhone 17 back dual camera 1.6mm f/2.2", "focal_real": 1.6, "focal_35mm": 13, "aperture": 2.2 }
+    ],
+    "iso_min": 32, "iso_max": 1600,
+    "shutter_min_us": 1000, "shutter_max_us": 33333
+  },
+  "iPhone 17 Pro": {
+    "lenses": [
+      { "label": "iPhone 17 Pro back triple camera 7.0mm f/1.78", "focal_real": 7.0, "focal_35mm": 24, "aperture": 1.78 },
+      { "label": "iPhone 17 Pro back triple camera 2.4mm f/2.2", "focal_real": 2.4, "focal_35mm": 13, "aperture": 2.2 },
+      { "label": "iPhone 17 Pro back triple camera 15mm f/2.8", "focal_real": 15.0, "focal_35mm": 200, "aperture": 2.8 }
+    ],
+    "iso_min": 24, "iso_max": 3200,
+    "shutter_min_us": 1000, "shutter_max_us": 33333
+  },
+  "iPhone 17 Pro Max": {
+    "lenses": [
+      { "label": "iPhone 17 Pro Max back triple camera 7.0mm f/1.78", "focal_real": 7.0, "focal_35mm": 24, "aperture": 1.78 },
+      { "label": "iPhone 17 Pro Max back triple camera 2.4mm f/2.2", "focal_real": 2.4, "focal_35mm": 13, "aperture": 2.2 },
+      { "label": "iPhone 17 Pro Max back triple camera 15mm f/2.8", "focal_real": 15.0, "focal_35mm": 200, "aperture": 2.8 }
+    ],
+    "iso_min": 24, "iso_max": 3200,
+    "shutter_min_us": 1000, "shutter_max_us": 33333
+  }
+}

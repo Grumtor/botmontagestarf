@@ -49,10 +49,14 @@ export function AudioOverlayInspector() {
       <input
         ref={inputRef}
         type="file"
-        accept="audio/mpeg,audio/wav,audio/mp4,audio/x-m4a,.mp3,.wav,.m4a"
+        accept="audio/mpeg,audio/wav,audio/mp4,audio/x-m4a,video/mp4,video/quicktime,.mp3,.wav,.m4a,.mp4,.mov"
         className="hidden"
         onChange={onPickFile}
       />
+      <p className="text-[10px] leading-snug text-muted-foreground">
+        Formats : MP3 / WAV / M4A / MP4 / MOV. Pour une vidéo, seul l&apos;audio
+        est extrait à l&apos;upload.
+      </p>
 
       {overlay.file_id && (
         <>

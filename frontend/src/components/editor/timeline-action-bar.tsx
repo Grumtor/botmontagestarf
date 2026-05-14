@@ -2,9 +2,11 @@
 
 import { useRef, useState } from "react";
 import {
+  Camera,
   Film,
   ImageIcon,
   ImagePlus,
+  Layers,
   Music,
   Smile,
   Sparkles,
@@ -28,6 +30,8 @@ export function TimelineActionBar() {
   const addImageClip = useEditorStore((s) => s.addImageClip);
   const addPlaceholder = useEditorStore((s) => s.addPlaceholderClip);
   const addLayer = useEditorStore((s) => s.addLayer);
+  const extraTracks = useEditorStore((s) => s.extraTracks);
+  const addExtraTrack = useEditorStore((s) => s.addExtraTrack);
   const patchLayerData = useEditorStore((s) => s.patchLayerData);
   const patchAudioOverlay = useEditorStore((s) => s.patchAudioOverlay);
   const setAudioSelected = useEditorStore((s) => s.setAudioSelected);
@@ -137,6 +141,13 @@ export function TimelineActionBar() {
         disabled={!template}
         variant="placeholder"
       />
+      <ActionButton
+        icon={Layers}
+        label={`+ Track (${extraTracks.length}/4)`}
+        onClick={() => addExtraTrack()}
+        disabled={!template || extraTracks.length >= 4}
+        variant="track"
+      />
       <Divider />
       <ActionButton
         icon={Type}
@@ -155,6 +166,13 @@ export function TimelineActionBar() {
         label="Emoji"
         onClick={() => pickOverlayLayer("emoji")}
         disabled={uploading || !template}
+      />
+      <ActionButton
+        icon={Camera}
+        label="Snap"
+        onClick={() => addLayer("snap")}
+        disabled={!template}
+        variant="snap"
       />
       <Divider />
       <ActionButton
@@ -213,19 +231,18 @@ function ActionButton({
   label: string;
   onClick: () => void;
   disabled?: boolean;
-  variant?: "default" | "placeholder";
+  variant?: "default" | "placeholder" | "snap" | "track";
 }) {
+  const cls =
+    variant === "placeholder"
+      ? "flex items-center gap-1.5 rounded-md border border-dashed border-yellow-500/70 px-2.5 py-1.5 text-xs text-yellow-300 transition hover:bg-yellow-700/20 disabled:opacity-50"
+      : variant === "snap"
+        ? "flex items-center gap-1.5 rounded-md border border-yellow-400/70 bg-yellow-400/10 px-2.5 py-1.5 text-xs text-yellow-200 transition hover:bg-yellow-400/20 disabled:opacity-50"
+        : variant === "track"
+          ? "flex items-center gap-1.5 rounded-md border border-indigo-400/70 bg-indigo-400/10 px-2.5 py-1.5 text-xs text-indigo-200 transition hover:bg-indigo-400/20 disabled:opacity-50"
+          : "flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs transition hover:bg-accent disabled:opacity-50";
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={
-        variant === "placeholder"
-          ? "flex items-center gap-1.5 rounded-md border border-dashed border-yellow-500/70 px-2.5 py-1.5 text-xs text-yellow-300 transition hover:bg-yellow-700/20 disabled:opacity-50"
-          : "flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs transition hover:bg-accent disabled:opacity-50"
-      }
-    >
+    <button type="button" onClick={onClick} disabled={disabled} className={cls}>
       <Icon className="h-3.5 w-3.5" />
       <span>{label}</span>
     </button>
