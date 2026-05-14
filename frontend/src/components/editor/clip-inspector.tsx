@@ -57,6 +57,10 @@ export function ClipInspector({ clip, extraTrackId }: Props) {
     setExtractingAudio(true);
     setExtractError(null);
     try {
+      // ESLint thinks `useClipAudioAsOverlay` is a React Hook because of
+      // the `use` prefix — it's actually just an API method on the
+      // `Templates` namespace. False positive, safe to silence.
+      // eslint-disable-next-line react-hooks/rules-of-hooks
       const updated = await Templates.useClipAudioAsOverlay(
         template.id,
         clip.id,
