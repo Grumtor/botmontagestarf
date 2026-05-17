@@ -5,6 +5,13 @@ import type { NextConfig } from "next";
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:8000";
 
 const nextConfig: NextConfig = {
+  experimental: {
+    // Default proxy body limit is 10MB; user uploads (iPhone .MP4 / .MOV)
+    // routinely exceed that. Aligned with backend UPLOAD_MAX_BYTES (500MB).
+    // Engaged via middleware.ts which matches /api/* — see Next.js docs:
+    // https://nextjs.org/docs/15/app/api-reference/config/next-config-js/middlewareClientMaxBodySize
+    middlewareClientMaxBodySize: "500mb",
+  },
   async rewrites() {
     return [
       {
