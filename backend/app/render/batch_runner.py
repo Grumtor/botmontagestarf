@@ -26,7 +26,6 @@ from app.render.pipeline import (
     OverlayInput,
     build_render_command,
 )
-from app.render.snap_renderer import render_snap_layer_to_png
 from app.render.text_renderer import (
     cache_key_for_layer,
     render_text_layer_to_png,
@@ -139,41 +138,14 @@ def _randomize_text_layer(layer: dict[str, Any]) -> dict[str, Any]:
     return new_layer
 
 
-def _randomize_snap_layer(layer: dict[str, Any]) -> dict[str, Any]:
-    """Random pick from text_pool + random Y in [y_pct_min, y_pct_max]."""
-    if layer.get("type") != "snap":
-        return layer
-
-    data = layer.get("data") or {}
-    new_layer = copy.deepcopy(layer)
-    new_data = new_layer.setdefault("data", {})
-
-    # Text pool pick
-    text_pool = data.get("text_pool")
-    if text_pool and isinstance(text_pool, list):
-        non_empty = [t for t in text_pool if isinstance(t, str) and t.strip()]
-        if non_empty:
-            new_data["text"] = random.choice(non_empty)
-
-    # Y position random pick
-    try:
-        y_min = float(data.get("y_pct_min", 50))
-        y_max = float(data.get("y_pct_max", 50))
-    except (TypeError, ValueError):
-        y_min, y_max = 50.0, 50.0
-    if y_max < y_min:
-        y_min, y_max = y_max, y_min
-    new_layer["y_pct"] = round(random.uniform(y_min, y_max), 4)
-    return new_layer
-
-
 def _randomize_layers(layers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for l in layers:
+        # Backward compat: legacy "snap" layers from removed feature are
+        # silently dropped instead of crashing the render.
         if l.get("type") == "snap":
-            out.append(_randomize_snap_layer(l))
-        else:
-            out.append(_randomize_text_layer(l))
+            continue
+        out.append(_randomize_text_layer(l))
     return out
 
 
@@ -251,6 +223,8 @@ def gather_render_inputs(
         ctype = clip.get("type", "fixed")
         audio_enabled = bool(clip.get("audio_enabled", True))
         audio_volume = float(clip.get("audio_volume", 1.0))
+        color_filter = str(clip.get("filter", "none") or "none")
+        freeze_tail = max(0.0, float(clip.get("freeze_tail_sec", 0) or 0))
 
         if ctype == "fixed":
             file_id = clip.get("file_id")
@@ -272,6 +246,8 @@ def gather_render_inputs(
                     ),
                     audio_enabled=audio_enabled,
                     audio_volume=audio_volume,
+                    color_filter=color_filter,
+                    freeze_tail_sec=freeze_tail,
                 )
             )
         elif ctype == "image":
@@ -293,6 +269,8 @@ def gather_render_inputs(
                     audio_volume=0.0,
                     target_duration=target_dur,
                     is_image=True,
+                    color_filter=color_filter,
+                    freeze_tail_sec=freeze_tail,
                 )
             )
         elif ctype == "placeholder":
@@ -324,6 +302,8 @@ def gather_render_inputs(
                     audio_enabled=audio_enabled,
                     audio_volume=audio_volume,
                     target_duration=target_dur,
+                    color_filter=color_filter,
+                    freeze_tail_sec=freeze_tail,
                 )
             )
         else:
@@ -338,7 +318,7 @@ def gather_render_inputs(
     # `target_duration` so each placeholder plays at its source video's
     # natural length. The output reel ends up as long as the user-
     # uploaded video (or sample) itself, which is what you want when
-    # the template is just text/snap overlays floating over user footage.
+    # the template is just text overlays floating over user footage.
     #
     # We ffprobe each source to populate trim_out so the audio chain
     # (silent fallback) matches the video duration in the concat. Image
@@ -486,6 +466,8 @@ def gather_render_inputs(
             audio_volume_x = float(clip.get("audio_volume", 1.0))
             video_enabled_x = bool(clip.get("video_enabled", True))
             start_time = float(clip.get("start_time", 0))
+            color_filter_x = str(clip.get("filter", "none") or "none")
+            freeze_tail_x = max(0.0, float(clip.get("freeze_tail_sec", 0) or 0))
             # duration_sec: explicit field wins. For fixed extra clips
             # the frontend stores the timeline duration implicitly via
             # trim_out (see editor.ts addExtraFixedClip), so fall back
@@ -533,6 +515,8 @@ def gather_render_inputs(
                         audio_volume=0.0 if is_image else audio_volume_x,
                         is_image=is_image,
                         video_enabled=video_enabled_x,
+                        color_filter=color_filter_x,
+                        freeze_tail_sec=freeze_tail_x,
                     )
                 )
             elif ctype == "placeholder":
@@ -567,6 +551,8 @@ def gather_render_inputs(
                         audio_enabled=audio_enabled_x,
                         audio_volume=audio_volume_x,
                         video_enabled=video_enabled_x,
+                        color_filter=color_filter_x,
+                        freeze_tail_sec=freeze_tail_x,
                     )
                 )
             else:
@@ -591,15 +577,10 @@ def _render_text_pngs(
     output_w: int,
     output_h: int,
 ) -> dict[str, Path]:
-    """Pre-render layers that need a Pillow PNG overlay instead of ffmpeg's
-    `drawtext` :
-
-      - Text layers containing emoji (drawtext can't fallback fonts → tofu)
-      - Snap filter layers (full-width semi-transparent caption bar)
-
-    Each PNG is canvas-sized so the pipeline just `overlay`s it at (0,0).
-    Cached by content hash for the text-emoji case; snap layers always
-    re-render because their Y position is randomised per output.
+    """Pre-render text layers containing emoji as Pillow PNG overlays —
+    ffmpeg's `drawtext` can't fallback fonts so emoji glyphs would render
+    as tofu. Each PNG is canvas-sized so the pipeline just `overlay`s it
+    at (0,0). Cached by content hash.
     """
     out: dict[str, Path] = {}
     cache_dir = output_path.parent / "_text_pngs"
@@ -650,46 +631,6 @@ def _render_text_pngs(
                 except Exception as e:
                     log.exception(
                         "render_text_layer_to_png failed for layer %s: %s",
-                        layer_id, e,
-                    )
-                    continue
-            out[str(layer_id)] = png_path
-            continue
-
-        # ----- Snap filter layer -----
-        if layer_type == "snap":
-            if not str(data.get("text") or ""):
-                continue
-            font_path = (
-                ctx.font_paths.get("inter")
-                or next(iter(ctx.font_paths.values()), None)
-            )
-            if not font_path:
-                log.warning(
-                    "snap layer %s skipped: no font available",
-                    layer_id,
-                )
-                continue
-            # Y is random per render → unique hash per output (use layer_id
-            # + the rolled y_pct so concurrent renders in a batch don't
-            # collide on the cache).
-            base = cache_key_for_layer(layer, output_w, output_h)
-            y = round(float(layer.get("y_pct", 50)), 2)
-            png_path = cache_dir / f"snap_{base}_{int(y * 100)}.png"
-            if not png_path.is_file():
-                try:
-                    rendered = render_snap_layer_to_png(
-                        layer=layer,
-                        font_path=font_path,
-                        output_w=output_w,
-                        output_h=output_h,
-                        out_path=png_path,
-                    )
-                    if rendered is None:
-                        continue
-                except Exception as e:
-                    log.exception(
-                        "render_snap_layer_to_png failed for layer %s: %s",
                         layer_id, e,
                     )
                     continue

@@ -14,7 +14,6 @@ export const LAYER_TYPES: { type: LayerType; label: string }[] = [
   { type: "image", label: "Image" },
   { type: "gif", label: "GIF" },
   { type: "emoji", label: "Emoji" },
-  { type: "snap", label: "Snap" },
 ];
 
 export const LAYER_LABELS: Record<LayerType, string> = LAYER_TYPES.reduce(
@@ -27,7 +26,6 @@ export const LAYER_COLORS: Record<LayerType, string> = {
   image: "rgba(34, 197, 94, 0.55)",      // vert
   gif: "rgba(236, 72, 153, 0.55)",       // rose
   emoji: "rgba(249, 115, 22, 0.55)",     // orange
-  snap: "rgba(250, 204, 21, 0.55)",      // Snapchat yellow
 };
 
 // ===== clip color palette (Phase 26c) =================================
@@ -76,16 +74,6 @@ export function defaultLayerData(type: LayerType): Record<string, unknown> {
       italic: false,
     };
   }
-  if (type === "snap") {
-    return {
-      filter_type: "snap",
-      text: "Tape ton snap ici",
-      text_pool: [],
-      font_size_px: 36,
-      y_pct_min: 45,
-      y_pct_max: 55,
-    };
-  }
   // image / gif / emoji default — file_id null until user uploads
   return { file_id: null, rotation_deg: 0, opacity: 1, ratio_locked: true };
 }
@@ -99,12 +87,14 @@ export function fontFamily(fontId: FontId): string {
 // ===== clips =========================================================
 
 export function clipDuration(clip: Clip): number {
+  const freezeTail = Math.max(0, (clip as { freeze_tail_sec?: number }).freeze_tail_sec ?? 0);
   if (clip.type === "fixed") {
-    if (clip.trim_out != null) return Math.max(0, clip.trim_out - clip.trim_in);
-    return Math.max(0, (clip.source_duration_sec ?? 0) - clip.trim_in);
+    if (clip.trim_out != null)
+      return Math.max(0, clip.trim_out - clip.trim_in) + freezeTail;
+    return Math.max(0, (clip.source_duration_sec ?? 0) - clip.trim_in) + freezeTail;
   }
   // image and placeholder both expose duration_sec
-  return Math.max(0, clip.duration_sec);
+  return Math.max(0, clip.duration_sec) + freezeTail;
 }
 
 export function totalDuration(clips: Clip[]): number {
@@ -119,18 +109,20 @@ export function timelineDuration(opts: {
   extraTracks?: { clips: { type: "fixed" | "image" | "placeholder";
     start_time: number; trim_in: number; trim_out: number | null;
     duration_sec?: number; source_duration_sec?: number | null;
+    freeze_tail_sec?: number;
   }[] }[];
   layers?: { end_time: number }[];
 }): number {
   let max = totalDuration(opts.clips);
   for (const t of opts.extraTracks ?? []) {
     for (const c of t.clips) {
+      const freezeTail = Math.max(0, c.freeze_tail_sec ?? 0);
       const dur =
         c.type === "fixed"
           ? c.trim_out != null
-            ? Math.max(0, c.trim_out - c.trim_in)
-            : Math.max(0, (c.source_duration_sec ?? 0) - c.trim_in)
-          : Math.max(0, c.duration_sec ?? 0);
+            ? Math.max(0, c.trim_out - c.trim_in) + freezeTail
+            : Math.max(0, (c.source_duration_sec ?? 0) - c.trim_in) + freezeTail
+          : Math.max(0, c.duration_sec ?? 0) + freezeTail;
       const end = c.start_time + dur;
       if (end > max) max = end;
     }

@@ -117,7 +117,7 @@ export const Fonts = {
 
 // ===== layers (overlays on top of the video) =========================
 
-export const LayerTypeSchema = z.enum(["text", "image", "gif", "emoji", "snap"]);
+export const LayerTypeSchema = z.enum(["text", "image", "gif", "emoji"]);
 export type LayerType = z.infer<typeof LayerTypeSchema>;
 
 export const LayerSchema = z.object({
@@ -208,35 +208,10 @@ export function parseAssetData(data: unknown): AssetLayerData {
     : { file_id: null, rotation_deg: 0, opacity: 1, ratio_locked: true };
 }
 
-// ----- snap layer data (Snapchat-style caption bar) -----------------
-//
-// Renders a full-width semi-transparent dark bar with white centred text
-// over the video. The bar's vertical position is randomised per render
-// between `y_pct_min` and `y_pct_max`, and a text variation is picked at
-// random from `text_pool`. This is layer-type "snap" — visually fixed
-// "Snap" look, no font/colour controls (intentional simplicity).
-
-export const SnapFilterSchema = z.literal("snap");
-
-export const SnapLayerDataSchema = z.object({
-  filter_type: SnapFilterSchema.default("snap"),
-  // text_pool: each entry = one variation, random pick per render. If
-  // empty, falls back to `text` (single).
-  text: z.string().default(""),
-  text_pool: z.array(z.string()).default([]),
-  font_size_px: z.number().default(36),
-  // Vertical placement range in % of canvas height. min == max → fixed.
-  y_pct_min: z.number().default(45),
-  y_pct_max: z.number().default(55),
-});
-export type SnapLayerData = z.infer<typeof SnapLayerDataSchema>;
-
-export function parseSnapData(data: unknown): SnapLayerData {
-  const r = SnapLayerDataSchema.safeParse(data ?? {});
-  return r.success ? r.data : SnapLayerDataSchema.parse({});
-}
-
 // ===== clips on the main video track =================================
+
+export const ClipFilterSchema = z.enum(["none", "bw"]);
+export type ClipFilter = z.infer<typeof ClipFilterSchema>;
 
 export const ClipBaseSchema = z.object({
   id: z.string(),
@@ -244,6 +219,11 @@ export const ClipBaseSchema = z.object({
   audio_volume: z.number().default(1.0),
   trim_in: z.number().default(0),
   trim_out: z.number().nullable().default(null),
+  /** Per-clip color filter. "none" = source colors, "bw" = grayscale. */
+  filter: ClipFilterSchema.default("none"),
+  /** Freeze the last visible frame for this many extra seconds after the
+   *  clip's natural end. 0 = no freeze. Used to hold a moment as a still. */
+  freeze_tail_sec: z.number().default(0),
 });
 
 export const FixedClipSchema = ClipBaseSchema.extend({

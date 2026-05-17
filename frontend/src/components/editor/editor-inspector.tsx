@@ -6,7 +6,6 @@ import { TextInspector } from "./text-inspector";
 import { AssetLayerInspector } from "./asset-layer-inspector";
 import { AudioOverlayInspector } from "./audio-inspectors";
 import { ClipInspector } from "./clip-inspector";
-import { SnapInspector } from "./snap-inspector";
 
 const VISUAL_LAYER_TYPES = new Set(["image", "gif", "emoji"]);
 
@@ -54,8 +53,6 @@ export function EditorInspector() {
           </p>
         ) : layer.type === "text" ? (
           <TextInspector layer={layer} />
-        ) : layer.type === "snap" ? (
-          <SnapInspector layer={layer} />
         ) : VISUAL_LAYER_TYPES.has(layer.type) ? (
           <AssetLayerInspector layer={layer} />
         ) : (

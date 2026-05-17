@@ -62,6 +62,12 @@ class ClipInput:
     # `-loop 1 -framerate FPS -t target_duration` so the image becomes a
     # video of the right length. target_duration must be set.
     is_image: bool = False
+    # Per-clip color filter: "none" (default) or "bw" (grayscale).
+    color_filter: str = "none"
+    # Extra seconds appended at the end where the last visible frame is
+    # held (video) and silence is mixed (audio). Lets the user "freeze"
+    # the closing moment without re-trimming or duplicating the clip.
+    freeze_tail_sec: float = 0.0
 
 
 @dataclass
@@ -91,6 +97,8 @@ class ExtraClipInput:
     audio_volume: float
     is_image: bool = False
     video_enabled: bool = True
+    color_filter: str = "none"
+    freeze_tail_sec: float = 0.0
 
 
 # ---- text drawtext ---------------------------------------------------
@@ -269,7 +277,10 @@ def build_render_command(
         v_label = f"cv{i}"
         a_label = f"ca{i}"
 
-        # Video sub-chain: trim, scale+crop, optionally force exact duration.
+        freeze_tail = max(0.0, clip.freeze_tail_sec)
+
+        # Video sub-chain: trim, scale+crop, optionally force exact duration,
+        # optionally apply color filter, optionally freeze last frame N sec.
         v_chain = f"[{in_idx}:v]"
         if clip.trim_out is not None:
             v_chain += f"trim=start={clip.trim_in}:end={clip.trim_out},"
@@ -289,6 +300,13 @@ def build_render_command(
                 f"tpad=stop_mode=clone:stop_duration={td:.3f},"
                 f"trim=duration={td:.3f},setpts=PTS-STARTPTS,"
             )
+        if freeze_tail > 0:
+            v_chain += (
+                f"tpad=stop_mode=clone:stop_duration={freeze_tail:.3f},"
+            )
+        if clip.color_filter == "bw":
+            # format=gray drops chroma, then back to yuv420p for the encoder.
+            v_chain += "format=gray,format=yuv420p,"
         v_chain += f"fps={fps}"
         v_chain += f"[{v_label}]"
         chains.append(v_chain)
@@ -310,6 +328,21 @@ def build_render_command(
                     f",apad=whole_dur={td:.3f},"
                     f"atrim=duration={td:.3f},asetpts=PTS-STARTPTS"
                 )
+            if freeze_tail > 0:
+                # Pad with silence for the freeze tail (audio always goes
+                # quiet during a freeze frame — matches user expectation).
+                base_dur = (
+                    clip.target_duration
+                    if clip.target_duration is not None
+                    else (clip.trim_out - clip.trim_in)
+                    if clip.trim_out is not None
+                    else 0.0
+                )
+                total = max(0.1, base_dur + freeze_tail)
+                a_chain += (
+                    f",apad=whole_dur={total:.3f},"
+                    f"atrim=duration={total:.3f},asetpts=PTS-STARTPTS"
+                )
             a_chain += f"[{a_label}]"
         else:
             # Silent audio matching the clip's expected duration.
@@ -319,6 +352,7 @@ def build_render_command(
                 dur = clip.trim_out - clip.trim_in
             else:
                 dur = 0
+            dur += freeze_tail
             a_chain = (
                 f"anullsrc=channel_layout=stereo:sample_rate=44100"
                 f":duration={max(0.1, dur):.3f}[{a_label}]"
@@ -345,8 +379,14 @@ def build_render_command(
             main_total += c.target_duration
         elif c.trim_out is not None:
             main_total += max(0.0, c.trim_out - c.trim_in)
+        main_total += max(0.0, c.freeze_tail_sec)
     extras_end = max(
-        (ex.start_time + max(0.1, ex.duration_sec) for ex in extra_clips),
+        (
+            ex.start_time
+            + max(0.1, ex.duration_sec)
+            + max(0.0, ex.freeze_tail_sec)
+            for ex in extra_clips
+        ),
         default=0.0,
     )
     layers_end = max(
@@ -383,7 +423,12 @@ def build_render_command(
     extra_audio_labels: list[str] = []
     for i, ex in enumerate(extra_clips):
         ex_in_idx = extra_input_indices[i]
+        # Extra clip total = duration_sec (the natural playback) + freeze_tail
+        # appended afterwards. The freeze tail holds the last visible frame
+        # and goes silent.
+        freeze_tail_ex = max(0.0, ex.freeze_tail_sec)
         td = max(0.1, ex.duration_sec)
+        total_ex = td + freeze_tail_ex
 
         if ex.video_enabled:
             scaled_label = f"ev{i}"
@@ -400,21 +445,23 @@ def build_render_command(
                 f"scale={output_w}:{output_h}:force_original_aspect_ratio=increase,"
                 f"crop={output_w}:{output_h},"
             )
-            # Force exactly duration_sec so it ends cleanly even if source is
-            # longer; also pad if shorter (clone last frame).
+            # Force exactly total_ex so it ends cleanly: tpad clone-pads the
+            # last frame for both the natural shortfall AND the freeze tail.
             v_chain += (
-                f"tpad=stop_mode=clone:stop_duration={td:.3f},"
-                f"trim=duration={td:.3f},setpts=PTS-STARTPTS,"
+                f"tpad=stop_mode=clone:stop_duration={total_ex:.3f},"
+                f"trim=duration={total_ex:.3f},setpts=PTS-STARTPTS,"
             )
+            if ex.color_filter == "bw":
+                v_chain += "format=gray,format=yuv420p,"
             v_chain += f"fps={fps},"
             # Delay to absolute timeline position via setpts.
             v_chain += f"setpts=PTS+{ex.start_time:.3f}/TB[{scaled_label}]"
             chains.append(v_chain)
 
-            # Overlay onto current_v. enable=between(t,start,start+duration)
+            # Overlay onto current_v. enable=between(t,start,start+total)
             # so the base shows through outside this range.
             next_v = f"ext{i}"
-            end_t = ex.start_time + td
+            end_t = ex.start_time + total_ex
             chains.append(
                 f"[{current_v}][{scaled_label}]"
                 f"overlay=0:0:enable='between(t\\,{ex.start_time:.3f}\\,{end_t:.3f})'"
@@ -425,6 +472,7 @@ def build_render_command(
         # the lower tracks stay visible. Audio chain below still runs.
 
         # Audio sub-chain for this extra clip if enabled and not an image.
+        # The freeze tail goes silent (apad won't extend past td).
         if ex.audio_enabled and ex.audio_volume > 0 and not ex.is_image:
             a_label = f"ea{i}"
             a_chain = f"[{ex_in_idx}:a]"
@@ -474,24 +522,6 @@ def build_render_command(
             chains.append(
                 f"[{current_v}]"
                 f"{_drawtext_filter(layer, font_path, text, output_w, output_h)}"
-                f"[{next_label}]"
-            )
-            current_v = next_label
-            continue
-
-        if layer_type == "snap":
-            # Snap layers always go through the pre-rendered PNG path
-            # (semi-transparent bar + centered text + Apple emojis).
-            layer_id = layer.get("id")
-            png_idx = text_png_input_idx.get(layer_id) if layer_id else None
-            if png_idx is None:
-                continue
-            start = float(layer.get("start_time", 0))
-            end = float(layer.get("end_time", 0))
-            next_label = f"sn{i}"
-            chains.append(
-                f"[{current_v}][{png_idx}:v]"
-                f"overlay=0:0:enable='between(t\\,{start}\\,{end})'"
                 f"[{next_label}]"
             )
             current_v = next_label

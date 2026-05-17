@@ -616,18 +616,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   addLayer: (type) => {
     const s = get();
-    // Snap layers are full-canvas-width bars with auto-computed height.
-    // Defaults reflect that (x=0, w=100, y at 50% canvas, h auto-ish).
-    const isSnap = type === "snap";
     const layer: Layer = {
       id: crypto.randomUUID(),
       type,
       start_time: 0,
       end_time: 3,
-      x_pct: isSnap ? 0 : 25,
-      y_pct: isSnap ? 50 : 35,
-      width_pct: isSnap ? 100 : 50,
-      height_pct: isSnap ? 8 : 30,
+      x_pct: 25,
+      y_pct: 35,
+      width_pct: 50,
+      height_pct: 30,
       z_index: s.layers.length,
       data: defaultLayerData(type),
     };

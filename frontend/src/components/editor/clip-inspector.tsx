@@ -274,6 +274,45 @@ export function ClipInspector({ clip, extraTrackId }: Props) {
         </Section>
       )}
 
+      {/* Effets visuels + freeze frame — applicables à tous les types. */}
+      <Section title="Effets">
+        <button
+          type="button"
+          onClick={() =>
+            patchClip(clip.id, {
+              filter: (clip.filter ?? "none") === "bw" ? "none" : "bw",
+            })
+          }
+          className={cn(
+            "flex w-full items-center justify-between rounded-md border px-3 py-2 text-xs transition",
+            (clip.filter ?? "none") === "bw"
+              ? "border-primary bg-accent"
+              : "border-border hover:bg-accent/50",
+          )}
+          title="Convertit ce clip en noir et blanc à l'export et dans l'aperçu."
+        >
+          <span>Noir &amp; blanc</span>
+          <span className="text-muted-foreground">
+            {(clip.filter ?? "none") === "bw" ? "ON" : "OFF"}
+          </span>
+        </button>
+
+        <NumberField
+          label="Geler la dernière image (sec)"
+          value={clip.freeze_tail_sec ?? 0}
+          step={0.1}
+          onChange={(v) =>
+            patchClip(clip.id, { freeze_tail_sec: Math.max(0, v) })
+          }
+        />
+        <p className="text-[10px] leading-snug text-muted-foreground">
+          Le clip joue normalement puis fige sa dernière image pendant X
+          sec. Pour figer au milieu d&apos;un clip : place le playhead,
+          appuie sur <kbd className="rounded bg-muted px-1">S</kbd> pour
+          couper, puis ajoute un freeze à la première moitié.
+        </p>
+      </Section>
+
       {!isImage && (
         <Section title="Audio">
         <button

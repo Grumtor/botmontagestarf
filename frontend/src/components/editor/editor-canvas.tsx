@@ -16,14 +16,12 @@ import {
 import { cn } from "@/lib/utils";
 import {
   parseAssetData,
-  parseSnapData,
   parseTextData,
   type Layer,
 } from "@/lib/api";
 import { FontLoader } from "./font-loader";
 import { TextLayerContent } from "./text-layer";
 import { AssetLayerContent } from "./asset-layer";
-import { SnapLayerContent } from "./snap-layer";
 
 type Handle = "tl" | "tm" | "tr" | "ml" | "mr" | "bl" | "bm" | "br";
 
@@ -154,14 +152,15 @@ export function EditorCanvas() {
     extraTracks.forEach((track, idx) => {
       for (const c of track.clips) {
         if (c.video_enabled === false) continue;
+        const freezeTail = Math.max(0, c.freeze_tail_sec ?? 0);
         const dur =
           c.type === "fixed"
             ? c.trim_out != null
-              ? Math.max(0.1, c.trim_out - c.trim_in)
+              ? Math.max(0.1, c.trim_out - c.trim_in) + freezeTail
               : c.source_duration_sec != null
-                ? Math.max(0.1, c.source_duration_sec - c.trim_in)
-                : 3
-            : Math.max(0.1, c.duration_sec);
+                ? Math.max(0.1, c.source_duration_sec - c.trim_in) + freezeTail
+                : 3 + freezeTail
+            : Math.max(0.1, c.duration_sec) + freezeTail;
         if (
           currentTime >= c.start_time &&
           currentTime <= c.start_time + dur
@@ -184,6 +183,10 @@ export function EditorCanvas() {
   const activeClip = active ? clips[active.clipIndex] : null;
   const activeIsFixed = activeClip?.type === "fixed";
   const activeIsImage = activeClip?.type === "image";
+  const activeFilterStyle =
+    activeClip && (activeClip.filter ?? "none") === "bw"
+      ? { filter: "grayscale(1)" }
+      : undefined;
 
   const activeFileUrl =
     template && activeClip && (activeClip.type === "fixed" || activeClip.type === "image")
@@ -191,10 +194,17 @@ export function EditorCanvas() {
       : null;
 
   // When src changes, reload video. When playing, ensure local seek + play.
+  // Cap source seek to (source_duration - trim_in) so freeze_tail_sec
+  // appears as a held last frame in the preview.
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !activeFileUrl || !activeClip || activeClip.type !== "fixed") return;
-    const sourceTime = activeClip.trim_in + (active?.localTime ?? 0);
+    const naturalDur =
+      activeClip.trim_out != null
+        ? Math.max(0, activeClip.trim_out - activeClip.trim_in)
+        : Math.max(0, (activeClip.source_duration_sec ?? 0) - activeClip.trim_in);
+    const local = Math.min(active?.localTime ?? 0, naturalDur);
+    const sourceTime = activeClip.trim_in + local;
     if (Math.abs(v.currentTime - sourceTime) > 0.2) {
       try {
         v.currentTime = sourceTime;
@@ -263,6 +273,7 @@ export function EditorCanvas() {
             key={activeFileUrl}
             src={activeFileUrl}
             className="absolute inset-0 h-full w-full object-cover"
+            style={activeFilterStyle}
             playsInline
             preload="auto"
           />
@@ -275,6 +286,7 @@ export function EditorCanvas() {
             alt=""
             draggable={false}
             className="absolute inset-0 h-full w-full select-none object-cover"
+            style={activeFilterStyle}
           />
         )}
 
@@ -285,6 +297,7 @@ export function EditorCanvas() {
                 ref={sampleVideoRef}
                 src={SampleVideo.url()}
                 className="absolute inset-0 h-full w-full object-cover"
+                style={activeFilterStyle}
                 playsInline
                 muted
                 loop
@@ -415,10 +428,8 @@ function CanvasLayer({
   const selected = layer.id === selectedLayerId;
 
   const isText = layer.type === "text";
-  const isSnap = layer.type === "snap";
   const textData = isText ? parseTextData(layer.data) : null;
-  const snapData = isSnap ? parseSnapData(layer.data) : null;
-  const assetData = !isText && !isSnap ? parseAssetData(layer.data) : null;
+  const assetData = !isText ? parseAssetData(layer.data) : null;
   const ratioLocked = assetData?.ratio_locked === true;
 
   // When the layer is a text in random-placement mode, dragging is
@@ -583,8 +594,7 @@ function CanvasLayer({
       {isText && textData && (
         <TextLayerContent data={textData} text={textData.text} />
       )}
-      {isSnap && snapData && <SnapLayerContent data={snapData} />}
-      {!isText && !isSnap && assetData && (
+      {!isText && assetData && (
         <AssetLayerContent data={assetData} templateId={templateId} />
       )}
 
@@ -786,12 +796,20 @@ function ExtraClipCanvas({
   localTime: number;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const filterStyle =
+    (clip.filter ?? "none") === "bw" ? { filter: "grayscale(1)" } : undefined;
 
-  // Seek the underlying <video> to the right source frame.
+  // Seek the underlying <video> to the right source frame, capped to the
+  // natural source end so freeze_tail_sec appears as a held last frame.
   useEffect(() => {
     const v = videoRef.current;
     if (!v || clip.type !== "fixed") return;
-    const sourceTime = clip.trim_in + Math.max(0, localTime);
+    const naturalDur =
+      clip.trim_out != null
+        ? Math.max(0, clip.trim_out - clip.trim_in)
+        : Math.max(0, (clip.source_duration_sec ?? 0) - clip.trim_in);
+    const capped = Math.min(Math.max(0, localTime), naturalDur);
+    const sourceTime = clip.trim_in + capped;
     if (Math.abs(v.currentTime - sourceTime) > 0.2) {
       try {
         v.currentTime = sourceTime;
@@ -809,6 +827,7 @@ function ExtraClipCanvas({
         key={url}
         src={url}
         className="absolute inset-0 h-full w-full object-cover"
+        style={filterStyle}
         playsInline
         muted
         preload="auto"
@@ -824,6 +843,7 @@ function ExtraClipCanvas({
         alt=""
         draggable={false}
         className="absolute inset-0 h-full w-full select-none object-cover"
+        style={filterStyle}
       />
     );
   }
@@ -833,6 +853,7 @@ function ExtraClipCanvas({
       key={`placeholder-${clip.id}`}
       src={SampleVideo.url()}
       className="absolute inset-0 h-full w-full object-cover"
+      style={filterStyle}
       playsInline
       muted
       loop
