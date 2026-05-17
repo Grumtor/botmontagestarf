@@ -58,7 +58,7 @@ class RenderBatchRequest(BaseModel):
     # portent leur propre `gen_idx`, cas du random reroll côté wizard).
     generations: int = Field(default=1, ge=1, le=10)
     # Phase 29 — naming style des MP4 dans le ZIP final.
-    # "iphone" → IMG_xxxx.MOV, "default" → {slug(template)}_{i}.mp4
+    # "iphone" → IMG_xxxx.mp4, "default" → {slug(template)}_{i}.mp4
     naming: str = Field(default="iphone")
     # Phase 29c — label pour les sous-dossiers de groupement dans le ZIP.
     # "Generation" par défaut (cas generations multiplier). En mode random

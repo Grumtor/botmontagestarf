@@ -8,7 +8,7 @@ run ffmpeg (full quality), apply optional QuickTime spoofing, and ZIP
 everything at the end. Temp upload tokens are deleted after processing.
 
 Phase 29 — `metadata_profile["naming"]` controls how files are named
-in the final ZIP : "iphone" → IMG_xxxx.MOV (Apple-style), "default" →
+in the final ZIP : "iphone" → IMG_xxxx.mp4 (Apple-style naming), "default" →
 {slug(template)}_{i}.mp4. The naming applies only to the ZIP arcnames,
 the on-disk render outputs keep their internal scheme.
 
@@ -137,13 +137,20 @@ def process_render_job(job_id: int) -> None:
         # Pre-compute the apple-style filename per output path so the
         # individual download endpoint (/api/files/render_item/...) can
         # return the same names as the ZIP. Without this, the ZIP shows
-        # IMG_*.MOV but per-file downloads show template_*.mp4 — looks
+        # IMG_*.mp4 but per-file downloads show template_*.mp4 — looks
         # like the option is broken to the user.
+        #
+        # Extension : `.mp4` (et pas `.MOV`) parce que les apps de
+        # messagerie (WhatsApp/Telegram) re-encodent les vidéos et leur
+        # parser QuickTime sur du `.MOV` non-réellement-QT laissait
+        # tomber l'audio. .mp4 garde tout le monde dans le code path
+        # MP4 standard. Le préfixe IMG_ + le compteur 4 chiffres
+        # gardent l'apparence "capture iPhone" suffisamment.
         apple_name_by_path: dict[str, str] = {}
         if naming == "iphone":
             counter = random.randint(1500, 9000)
             for f, _gen_idx in sorted_entries:
-                apple_name_by_path[f] = f"IMG_{counter:04d}.MOV"
+                apple_name_by_path[f] = f"IMG_{counter:04d}.mp4"
                 counter += 1
 
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
