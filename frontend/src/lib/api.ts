@@ -219,15 +219,26 @@ export const ClipBaseSchema = z.object({
   audio_volume: z.number().default(1.0),
   trim_in: z.number().default(0),
   trim_out: z.number().nullable().default(null),
-  /** Per-clip color filter. "none" = source colors, "bw" = grayscale. */
+  /** Per-clip color filter. "none" = source colors, "bw" = grayscale.
+   *  Applies to the video portions (pre + post the freeze), NOT to the
+   *  freeze sub-segment itself (which has its own `freeze_filter`). */
   filter: ClipFilterSchema.default("none"),
   /** Optional time range (in local clip seconds, from 0) during which the
    *  filter applies. Both null = filter on the whole clip. Either set =
    *  filter only between [filter_start_sec, filter_end_sec]. */
   filter_start_sec: z.number().nullable().default(null),
   filter_end_sec: z.number().nullable().default(null),
-  /** Freeze the last visible frame for this many extra seconds after the
-   *  clip's natural end. 0 = no freeze. Used to hold a moment as a still. */
+  /** Freeze sub-segment INSIDE the clip. Position is given in local clip
+   *  seconds (0 = clip start, naturalDur = clip end). null = no freeze.
+   *  A freeze of duration D inserts D seconds of held last-frame at that
+   *  position — the clip total duration grows by D. The freeze can have
+   *  its own independent B&W via `freeze_filter`. */
+  freeze_at_sec: z.number().nullable().default(null),
+  freeze_duration_sec: z.number().default(0),
+  freeze_filter: ClipFilterSchema.default("none"),
+  /** Legacy field (pre-refonte) — freeze appended at the end of the clip.
+   *  Kept for backward compat ; auto-migrated to freeze_at_sec=naturalDur
+   *  on first load. New code should use the trio above. */
   freeze_tail_sec: z.number().default(0),
 });
 

@@ -70,9 +70,18 @@ class ClipInput:
     # colors are preserved.
     filter_start_sec: Optional[float] = None
     filter_end_sec: Optional[float] = None
-    # Extra seconds appended at the end where the last visible frame is
-    # held (video) and silence is mixed (audio). Lets the user "freeze"
-    # the closing moment without re-trimming or duplicating the clip.
+    # New freeze model — inserts a held frame INSIDE the clip at the
+    # given local position (sec from clip start in natural play time).
+    # freeze_at_sec None = no freeze. freeze_duration_sec > 0 adds that
+    # many seconds of held frame at the position, with optional
+    # independent B&W via freeze_filter ("none" | "bw"). Audio goes
+    # silent during the freeze.
+    freeze_at_sec: Optional[float] = None
+    freeze_duration_sec: float = 0.0
+    freeze_filter: str = "none"
+    # Legacy field — kept for backward compat on unmigrated templates
+    # (extends the clip's tail by N seconds of held frame). New code
+    # should use the freeze_at/duration/filter trio above.
     freeze_tail_sec: float = 0.0
 
 
@@ -106,6 +115,9 @@ class ExtraClipInput:
     color_filter: str = "none"
     filter_start_sec: Optional[float] = None
     filter_end_sec: Optional[float] = None
+    freeze_at_sec: Optional[float] = None
+    freeze_duration_sec: float = 0.0
+    freeze_filter: str = "none"
     freeze_tail_sec: float = 0.0
 
 
@@ -186,6 +198,230 @@ def _resolve_font_path(
     if "inter" in font_paths:
         return font_paths["inter"]
     return next(iter(font_paths.values()), None)
+
+
+# ---- freeze helpers (new in-clip freeze model) ----------------------
+
+def _natural_dur_for(clip: "ClipInput | ExtraClipInput") -> float:
+    """Clip duration WITHOUT any freeze. For main-track ClipInput this
+    is target_duration (placeholders/images) or trim_out - trim_in.
+    For ExtraClipInput it's clip.duration_sec (set by the caller)."""
+    target = getattr(clip, "target_duration", None)
+    if target is not None:
+        return max(0.0, float(target))
+    duration_sec = getattr(clip, "duration_sec", None)
+    if duration_sec is not None:
+        return max(0.0, float(duration_sec))
+    if clip.trim_out is not None:
+        return max(0.0, clip.trim_out - clip.trim_in)
+    return 0.0
+
+
+def _bw_filter_token(
+    color_filter: str,
+    seg_start: float,
+    seg_end: float,
+    range_start: Optional[float],
+    range_end: Optional[float],
+) -> str:
+    """Return the ffmpeg filter snippet (with trailing comma) to apply
+    a B&W effect on a sub-segment, given the parent clip's filter range.
+    The segment spans local times [seg_start, seg_end] in clip-local
+    coords ; we map the BW range into that local frame and emit only
+    if there's actual overlap."""
+    if color_filter != "bw":
+        return ""
+    has_range = (
+        range_start is not None
+        and range_end is not None
+        and range_end > range_start >= 0
+    )
+    if not has_range:
+        return "format=gray,format=yuv420p,"
+    # Map the global range to local seg coords (seg local time = 0..seg_dur).
+    lo = max(0.0, (range_start or 0.0) - seg_start)
+    hi = min(seg_end - seg_start, (range_end or 0.0) - seg_start)
+    if hi <= lo:
+        return ""  # no overlap → no filter
+    return f"hue=s=0:enable='between(t\\,{lo:.3f}\\,{hi:.3f})',"
+
+
+def _build_inside_freeze_video(
+    clip: "ClipInput | ExtraClipInput",
+    in_idx: int,
+    out_label: str,
+    fps: int,
+    output_w: int,
+    output_h: int,
+) -> list[str]:
+    """Generate a 3-segment split-concat video chain for a clip with an
+    active in-clip freeze. Outputs to [out_label]. Images are special-
+    cased (no real split, just an extended single chain)."""
+    chains: list[str] = []
+    natural = _natural_dur_for(clip)
+    freeze_at = max(0.0, min(natural, float(clip.freeze_at_sec or 0.0)))
+    freeze_dur = max(0.1, float(clip.freeze_duration_sec))
+
+    if clip.is_image:
+        # Image: nothing to split — just extend total duration by freeze_dur
+        # (the image looks the same anyway). The freeze_filter applies to
+        # the freeze window via enable='between(t, freeze_at, freeze_at+dur)'.
+        v = f"[{in_idx}:v]setpts=PTS-STARTPTS,"
+        v += (
+            f"scale={output_w}:{output_h}:force_original_aspect_ratio=increase,"
+            f"crop={output_w}:{output_h},"
+        )
+        total = natural + freeze_dur
+        v += (
+            f"tpad=stop_mode=clone:stop_duration={total:.3f},"
+            f"trim=duration={total:.3f},setpts=PTS-STARTPTS,"
+        )
+        # Clip-wide filter first.
+        v += _bw_filter_token(
+            clip.color_filter, 0.0, natural,
+            getattr(clip, "filter_start_sec", None),
+            getattr(clip, "filter_end_sec", None),
+        )
+        # Freeze filter window on top.
+        if clip.freeze_filter == "bw":
+            v += (
+                f"hue=s=0:enable='between(t\\,{freeze_at:.3f}\\,"
+                f"{freeze_at + freeze_dur:.3f})',"
+            )
+        v += f"fps={fps}[{out_label}]"
+        chains.append(v)
+        return chains
+
+    # Real video / placeholder source : split into 3 streams.
+    pre_src = f"_{out_label}_pre_src"
+    fr_src = f"_{out_label}_fr_src"
+    post_src = f"_{out_label}_post_src"
+    pre_done = f"_{out_label}_pre"
+    fr_done = f"_{out_label}_fr"
+    post_done = f"_{out_label}_post"
+
+    chains.append(f"[{in_idx}:v]split=3[{pre_src}][{fr_src}][{post_src}]")
+
+    src_freeze_t = clip.trim_in + freeze_at
+    src_end = clip.trim_in + natural
+
+    # PRE: 0..freeze_at in clip-local time.
+    pre = f"[{pre_src}]trim=start={clip.trim_in:.3f}:end={src_freeze_t:.3f},"
+    pre += "setpts=PTS-STARTPTS,"
+    pre += (
+        f"scale={output_w}:{output_h}:force_original_aspect_ratio=increase,"
+        f"crop={output_w}:{output_h},"
+    )
+    pre += _bw_filter_token(
+        clip.color_filter, 0.0, freeze_at,
+        getattr(clip, "filter_start_sec", None),
+        getattr(clip, "filter_end_sec", None),
+    )
+    pre += f"fps={fps}[{pre_done}]"
+    chains.append(pre)
+
+    # FREEZE: 1 frame at freeze_at, tpad clone to freeze_dur. Optional
+    # independent B&W via freeze_filter.
+    frame_dt = 1.0 / max(1, fps)
+    fr = f"[{fr_src}]trim=start={src_freeze_t:.3f}:end={src_freeze_t + frame_dt:.3f},"
+    fr += "setpts=PTS-STARTPTS,"
+    fr += (
+        f"scale={output_w}:{output_h}:force_original_aspect_ratio=increase,"
+        f"crop={output_w}:{output_h},"
+    )
+    fr += (
+        f"tpad=stop_mode=clone:stop_duration={freeze_dur:.3f},"
+        f"trim=duration={freeze_dur:.3f},setpts=PTS-STARTPTS,"
+    )
+    if clip.freeze_filter == "bw":
+        fr += "format=gray,format=yuv420p,"
+    fr += f"fps={fps}[{fr_done}]"
+    chains.append(fr)
+
+    # POST: freeze_at..natural in clip-local time.
+    post_local_dur = max(0.0, natural - freeze_at)
+    post = f"[{post_src}]trim=start={src_freeze_t:.3f}:end={src_end:.3f},"
+    post += "setpts=PTS-STARTPTS,"
+    post += (
+        f"scale={output_w}:{output_h}:force_original_aspect_ratio=increase,"
+        f"crop={output_w}:{output_h},"
+    )
+    # Map the global filter range into post-local coords.
+    fs = getattr(clip, "filter_start_sec", None)
+    fe = getattr(clip, "filter_end_sec", None)
+    post += _bw_filter_token(
+        clip.color_filter, freeze_at, freeze_at + post_local_dur,
+        fs, fe,
+    )
+    post += f"fps={fps}[{post_done}]"
+    chains.append(post)
+
+    chains.append(
+        f"[{pre_done}][{fr_done}][{post_done}]"
+        f"concat=n=3:v=1[{out_label}]"
+    )
+    return chains
+
+
+def _build_inside_freeze_audio(
+    clip: "ClipInput | ExtraClipInput",
+    in_idx: int,
+    out_label: str,
+) -> list[str]:
+    """Audio chain matching the 3-segment freeze split. Pre + post
+    keep the source audio, the freeze window is replaced by silence
+    (matches user expectation : a held frame goes silent)."""
+    chains: list[str] = []
+    natural = _natural_dur_for(clip)
+    freeze_at = max(0.0, min(natural, float(clip.freeze_at_sec or 0.0)))
+    freeze_dur = max(0.1, float(clip.freeze_duration_sec))
+    src_freeze_t = clip.trim_in + freeze_at
+    src_end = clip.trim_in + natural
+
+    has_real_audio = (
+        clip.audio_enabled and clip.audio_volume > 0 and not clip.is_image
+    )
+
+    if not has_real_audio:
+        # No source audio → silence for the whole total duration.
+        total = natural + freeze_dur
+        chains.append(
+            f"anullsrc=channel_layout=stereo:sample_rate=44100"
+            f":duration={max(0.1, total):.3f}[{out_label}]"
+        )
+        return chains
+
+    pre_src = f"_{out_label}_pre_src"
+    post_src = f"_{out_label}_post_src"
+    pre_done = f"_{out_label}_pre"
+    fr_done = f"_{out_label}_fr"
+    post_done = f"_{out_label}_post"
+
+    chains.append(f"[{in_idx}:a]asplit=2[{pre_src}][{post_src}]")
+
+    # PRE audio
+    pre = f"[{pre_src}]atrim=start={clip.trim_in:.3f}:end={src_freeze_t:.3f},"
+    pre += "asetpts=PTS-STARTPTS,"
+    pre += f"volume={clip.audio_volume:.3f}[{pre_done}]"
+    chains.append(pre)
+
+    # FREEZE = silence
+    chains.append(
+        f"anullsrc=channel_layout=stereo:sample_rate=44100"
+        f":duration={freeze_dur:.3f}[{fr_done}]"
+    )
+
+    # POST audio
+    post = f"[{post_src}]atrim=start={src_freeze_t:.3f}:end={src_end:.3f},"
+    post += "asetpts=PTS-STARTPTS,"
+    post += f"volume={clip.audio_volume:.3f}[{post_done}]"
+    chains.append(post)
+
+    chains.append(
+        f"[{pre_done}][{fr_done}][{post_done}]"
+        f"concat=n=3:v=0:a=1[{out_label}]"
+    )
+    return chains
 
 
 # ---- public API ------------------------------------------------------
@@ -285,7 +521,30 @@ def build_render_command(
         v_label = f"cv{i}"
         a_label = f"ca{i}"
 
-        freeze_tail = max(0.0, clip.freeze_tail_sec)
+        # New freeze model — inserted INSIDE the clip at a chosen position.
+        # Takes precedence over the legacy freeze_tail_sec.
+        freeze_active = (
+            clip.freeze_at_sec is not None and clip.freeze_duration_sec > 0
+        )
+        freeze_tail = (
+            0.0 if freeze_active else max(0.0, clip.freeze_tail_sec)
+        )
+
+        # When freeze_active, we delegate to the split-concat helper that
+        # outputs to [v_label] / [a_label]. Skips all the per-clip
+        # inline logic below.
+        if freeze_active:
+            chains.extend(
+                _build_inside_freeze_video(
+                    clip, in_idx, v_label, fps, output_w, output_h,
+                )
+            )
+            chains.extend(
+                _build_inside_freeze_audio(clip, in_idx, a_label)
+            )
+            seg_v_labels.append(f"[{v_label}]")
+            seg_a_labels.append(f"[{a_label}]")
+            continue
 
         # Video sub-chain: trim, scale+crop, optionally force exact duration,
         # optionally apply color filter, optionally freeze last frame N sec.
@@ -396,18 +655,25 @@ def build_render_command(
         f"{seg_v_labels[i]}{seg_a_labels[i]}" for i in range(n)
     )
 
+    def _freeze_extra_sec(c: "ClipInput | ExtraClipInput") -> float:
+        # Either the new in-clip freeze OR the legacy tail freeze
+        # contributes to the timeline duration, never both.
+        if c.freeze_at_sec is not None and c.freeze_duration_sec > 0:
+            return max(0.0, float(c.freeze_duration_sec))
+        return max(0.0, float(c.freeze_tail_sec))
+
     main_total = 0.0
     for c in clips:
         if c.target_duration is not None:
             main_total += c.target_duration
         elif c.trim_out is not None:
             main_total += max(0.0, c.trim_out - c.trim_in)
-        main_total += max(0.0, c.freeze_tail_sec)
+        main_total += _freeze_extra_sec(c)
     extras_end = max(
         (
             ex.start_time
             + max(0.1, ex.duration_sec)
-            + max(0.0, ex.freeze_tail_sec)
+            + _freeze_extra_sec(ex)
             for ex in extra_clips
         ),
         default=0.0,
@@ -446,47 +712,66 @@ def build_render_command(
     extra_audio_labels: list[str] = []
     for i, ex in enumerate(extra_clips):
         ex_in_idx = extra_input_indices[i]
-        # Extra clip total = duration_sec (the natural playback) + freeze_tail
-        # appended afterwards. The freeze tail holds the last visible frame
-        # and goes silent.
-        freeze_tail_ex = max(0.0, ex.freeze_tail_sec)
+        # New in-clip freeze takes precedence ; freeze_tail is legacy.
+        freeze_active = (
+            ex.freeze_at_sec is not None and ex.freeze_duration_sec > 0
+        )
+        freeze_tail_ex = (
+            0.0 if freeze_active else max(0.0, ex.freeze_tail_sec)
+        )
         td = max(0.1, ex.duration_sec)
-        total_ex = td + freeze_tail_ex
+        total_ex = (
+            td + max(0.1, ex.freeze_duration_sec)
+            if freeze_active
+            else td + freeze_tail_ex
+        )
 
         if ex.video_enabled:
             scaled_label = f"ev{i}"
-            # Trim source if needed, scale+crop to canvas, force exact duration,
-            # then setpts to delay this stream to its absolute start_time.
-            v_chain = f"[{ex_in_idx}:v]"
-            if not ex.is_image:
-                if ex.trim_out is not None:
-                    v_chain += f"trim=start={ex.trim_in}:end={ex.trim_out},"
-                elif ex.trim_in > 0:
-                    v_chain += f"trim=start={ex.trim_in},"
-            v_chain += "setpts=PTS-STARTPTS,"
-            v_chain += (
-                f"scale={output_w}:{output_h}:force_original_aspect_ratio=increase,"
-                f"crop={output_w}:{output_h},"
-            )
-            # Force exactly total_ex so it ends cleanly: tpad clone-pads the
-            # last frame for both the natural shortfall AND the freeze tail.
-            v_chain += (
-                f"tpad=stop_mode=clone:stop_duration={total_ex:.3f},"
-                f"trim=duration={total_ex:.3f},setpts=PTS-STARTPTS,"
-            )
-            if ex.color_filter == "bw":
-                fs = ex.filter_start_sec
-                fe = ex.filter_end_sec
-                if fs is not None and fe is not None and fe > fs >= 0:
-                    v_chain += (
-                        f"hue=s=0:enable='between(t\\,{fs:.3f}\\,{fe:.3f})',"
+            if freeze_active:
+                # Delegate the 3-segment split-concat to the helper,
+                # then delay to the absolute start_time.
+                concat_label = f"_ex{i}_concat"
+                chains.extend(
+                    _build_inside_freeze_video(
+                        ex, ex_in_idx, concat_label,
+                        fps, output_w, output_h,
                     )
-                else:
-                    v_chain += "format=gray,format=yuv420p,"
-            v_chain += f"fps={fps},"
-            # Delay to absolute timeline position via setpts.
-            v_chain += f"setpts=PTS+{ex.start_time:.3f}/TB[{scaled_label}]"
-            chains.append(v_chain)
+                )
+                chains.append(
+                    f"[{concat_label}]setpts=PTS+{ex.start_time:.3f}/TB"
+                    f"[{scaled_label}]"
+                )
+            else:
+                # Legacy single-chain video. Trim, scale+crop, tpad to
+                # total_ex, optional BW, fps, then delay.
+                v_chain = f"[{ex_in_idx}:v]"
+                if not ex.is_image:
+                    if ex.trim_out is not None:
+                        v_chain += f"trim=start={ex.trim_in}:end={ex.trim_out},"
+                    elif ex.trim_in > 0:
+                        v_chain += f"trim=start={ex.trim_in},"
+                v_chain += "setpts=PTS-STARTPTS,"
+                v_chain += (
+                    f"scale={output_w}:{output_h}:force_original_aspect_ratio=increase,"
+                    f"crop={output_w}:{output_h},"
+                )
+                v_chain += (
+                    f"tpad=stop_mode=clone:stop_duration={total_ex:.3f},"
+                    f"trim=duration={total_ex:.3f},setpts=PTS-STARTPTS,"
+                )
+                if ex.color_filter == "bw":
+                    fs = ex.filter_start_sec
+                    fe = ex.filter_end_sec
+                    if fs is not None and fe is not None and fe > fs >= 0:
+                        v_chain += (
+                            f"hue=s=0:enable='between(t\\,{fs:.3f}\\,{fe:.3f})',"
+                        )
+                    else:
+                        v_chain += "format=gray,format=yuv420p,"
+                v_chain += f"fps={fps},"
+                v_chain += f"setpts=PTS+{ex.start_time:.3f}/TB[{scaled_label}]"
+                chains.append(v_chain)
 
             # Overlay onto current_v. enable=between(t,start,start+total)
             # so the base shows through outside this range.
@@ -502,22 +787,35 @@ def build_render_command(
         # the lower tracks stay visible. Audio chain below still runs.
 
         # Audio sub-chain for this extra clip if enabled and not an image.
-        # The freeze tail goes silent (apad won't extend past td).
         if ex.audio_enabled and ex.audio_volume > 0 and not ex.is_image:
             a_label = f"ea{i}"
-            a_chain = f"[{ex_in_idx}:a]"
-            if ex.trim_out is not None:
-                a_chain += f"atrim=start={ex.trim_in}:end={ex.trim_out},"
-            elif ex.trim_in > 0:
-                a_chain += f"atrim=start={ex.trim_in},"
-            a_chain += "asetpts=PTS-STARTPTS,"
-            a_chain += f"volume={ex.audio_volume:.3f},"
-            a_chain += f"atrim=duration={td:.3f},asetpts=PTS-STARTPTS"
-            delay_ms = max(0, int(ex.start_time * 1000))
-            if delay_ms > 0:
-                a_chain += f",adelay={delay_ms}:all=1"
-            a_chain += f"[{a_label}]"
-            chains.append(a_chain)
+            if freeze_active:
+                # 3-segment audio (pre + silence + post), then adelay.
+                pre_concat = f"_ex{i}_a_concat"
+                chains.extend(
+                    _build_inside_freeze_audio(ex, ex_in_idx, pre_concat)
+                )
+                delay_ms = max(0, int(ex.start_time * 1000))
+                if delay_ms > 0:
+                    chains.append(
+                        f"[{pre_concat}]adelay={delay_ms}:all=1[{a_label}]"
+                    )
+                else:
+                    chains.append(f"[{pre_concat}]acopy[{a_label}]")
+            else:
+                a_chain = f"[{ex_in_idx}:a]"
+                if ex.trim_out is not None:
+                    a_chain += f"atrim=start={ex.trim_in}:end={ex.trim_out},"
+                elif ex.trim_in > 0:
+                    a_chain += f"atrim=start={ex.trim_in},"
+                a_chain += "asetpts=PTS-STARTPTS,"
+                a_chain += f"volume={ex.audio_volume:.3f},"
+                a_chain += f"atrim=duration={td:.3f},asetpts=PTS-STARTPTS"
+                delay_ms = max(0, int(ex.start_time * 1000))
+                if delay_ms > 0:
+                    a_chain += f",adelay={delay_ms}:all=1"
+                a_chain += f"[{a_label}]"
+                chains.append(a_chain)
             extra_audio_labels.append(a_label)
 
     # 5. Apply visual overlays (text drawtext + image/gif overlay)

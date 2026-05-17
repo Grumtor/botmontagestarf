@@ -229,6 +229,13 @@ def gather_render_inputs(
         raw_fe = clip.get("filter_end_sec")
         filter_start = float(raw_fs) if raw_fs is not None else None
         filter_end = float(raw_fe) if raw_fe is not None else None
+        # New in-clip freeze model.
+        raw_freeze_at = clip.get("freeze_at_sec")
+        freeze_at = float(raw_freeze_at) if raw_freeze_at is not None else None
+        freeze_duration = max(
+            0.0, float(clip.get("freeze_duration_sec", 0) or 0)
+        )
+        freeze_filter = str(clip.get("freeze_filter", "none") or "none")
 
         if ctype == "fixed":
             file_id = clip.get("file_id")
@@ -253,6 +260,9 @@ def gather_render_inputs(
                     color_filter=color_filter,
                     filter_start_sec=filter_start,
                     filter_end_sec=filter_end,
+                    freeze_at_sec=freeze_at,
+                    freeze_duration_sec=freeze_duration,
+                    freeze_filter=freeze_filter,
                     freeze_tail_sec=freeze_tail,
                 )
             )
@@ -278,6 +288,9 @@ def gather_render_inputs(
                     color_filter=color_filter,
                     filter_start_sec=filter_start,
                     filter_end_sec=filter_end,
+                    freeze_at_sec=freeze_at,
+                    freeze_duration_sec=freeze_duration,
+                    freeze_filter=freeze_filter,
                     freeze_tail_sec=freeze_tail,
                 )
             )
@@ -313,6 +326,9 @@ def gather_render_inputs(
                     color_filter=color_filter,
                     filter_start_sec=filter_start,
                     filter_end_sec=filter_end,
+                    freeze_at_sec=freeze_at,
+                    freeze_duration_sec=freeze_duration,
+                    freeze_filter=freeze_filter,
                     freeze_tail_sec=freeze_tail,
                 )
             )
@@ -482,6 +498,14 @@ def gather_render_inputs(
             raw_fe_x = clip.get("filter_end_sec")
             filter_start_x = float(raw_fs_x) if raw_fs_x is not None else None
             filter_end_x = float(raw_fe_x) if raw_fe_x is not None else None
+            raw_freeze_at_x = clip.get("freeze_at_sec")
+            freeze_at_x = (
+                float(raw_freeze_at_x) if raw_freeze_at_x is not None else None
+            )
+            freeze_duration_x = max(
+                0.0, float(clip.get("freeze_duration_sec", 0) or 0)
+            )
+            freeze_filter_x = str(clip.get("freeze_filter", "none") or "none")
             # duration_sec: explicit field wins. For fixed extra clips
             # the frontend stores the timeline duration implicitly via
             # trim_out (see editor.ts addExtraFixedClip), so fall back
@@ -532,6 +556,9 @@ def gather_render_inputs(
                         color_filter=color_filter_x,
                         filter_start_sec=filter_start_x,
                         filter_end_sec=filter_end_x,
+                        freeze_at_sec=freeze_at_x,
+                        freeze_duration_sec=freeze_duration_x,
+                        freeze_filter=freeze_filter_x,
                         freeze_tail_sec=freeze_tail_x,
                     )
                 )
@@ -570,6 +597,9 @@ def gather_render_inputs(
                         color_filter=color_filter_x,
                         filter_start_sec=filter_start_x,
                         filter_end_sec=filter_end_x,
+                        freeze_at_sec=freeze_at_x,
+                        freeze_duration_sec=freeze_duration_x,
+                        freeze_filter=freeze_filter_x,
                         freeze_tail_sec=freeze_tail_x,
                     )
                 )

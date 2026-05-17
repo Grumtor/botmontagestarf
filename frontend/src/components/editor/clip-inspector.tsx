@@ -337,42 +337,97 @@ export function ClipInspector({ clip, extraTrackId }: Props) {
           </div>
         )}
 
-        {(clip.freeze_tail_sec ?? 0) === 0 ? (
+        {(clip.freeze_at_sec == null) ? (
           <Button
             variant="outline"
             size="sm"
             className="w-full"
-            onClick={() => patchClip(clip.id, { freeze_tail_sec: 2 })}
-            title="Ajoute un segment d'image figée de 2s à droite du clip — ajustable au pixel près avec la souris dans la timeline."
+            onClick={() => {
+              // Insère le freeze à la position du playhead dans le clip
+              // (clamped à [0, naturalDur]). Si playhead hors clip, on
+              // tombe au milieu du clip par défaut.
+              const local = Math.max(
+                0,
+                Math.min(clipDur, localPlayheadOffset),
+              );
+              const at = playheadInClip ? local : clipDur / 2;
+              patchClip(clip.id, {
+                freeze_at_sec: at,
+                freeze_duration_sec: 2,
+              });
+            }}
+            title="Ajoute un segment d'image figée à la position du playhead, durée 2s. Drag son bord droit ou son centre dans la timeline pour ajuster."
           >
-            + Ajouter un freeze (image figée) de 2s
+            + Geler une image (2s)
           </Button>
         ) : (
-          <div className="space-y-1.5">
-            <NumberField
-              label="Image figée (sec)"
-              value={clip.freeze_tail_sec ?? 0}
-              step={0.1}
-              onChange={(v) =>
-                patchClip(clip.id, { freeze_tail_sec: Math.max(0, v) })
+          <div className="space-y-1.5 rounded-md border border-cyan-400/30 bg-cyan-950/20 p-2">
+            <p className="text-[10px] uppercase tracking-wider text-cyan-200/80">
+              ❄ Image figée
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <NumberField
+                label="Position (sec)"
+                value={clip.freeze_at_sec}
+                step={0.1}
+                onChange={(v) =>
+                  patchClip(clip.id, {
+                    freeze_at_sec: Math.max(0, Math.min(clipDur, v)),
+                  })
+                }
+              />
+              <NumberField
+                label="Durée (sec)"
+                value={clip.freeze_duration_sec ?? 0}
+                step={0.1}
+                onChange={(v) =>
+                  patchClip(clip.id, {
+                    freeze_duration_sec: Math.max(0.1, v),
+                  })
+                }
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                patchClip(clip.id, {
+                  freeze_filter:
+                    (clip.freeze_filter ?? "none") === "bw" ? "none" : "bw",
+                })
               }
-            />
+              className={cn(
+                "flex w-full items-center justify-between rounded-md border px-3 py-1.5 text-xs transition",
+                (clip.freeze_filter ?? "none") === "bw"
+                  ? "border-primary bg-accent"
+                  : "border-border hover:bg-accent/50",
+              )}
+              title="N&B appliqué uniquement à l'image figée — indépendant du filtre du clip."
+            >
+              <span>N&amp;B sur le freeze</span>
+              <span className="text-muted-foreground">
+                {(clip.freeze_filter ?? "none") === "bw" ? "ON" : "OFF"}
+              </span>
+            </button>
             <Button
               variant="ghost"
               size="sm"
               className="w-full text-[11px] text-muted-foreground"
-              onClick={() => patchClip(clip.id, { freeze_tail_sec: 0 })}
+              onClick={() =>
+                patchClip(clip.id, {
+                  freeze_at_sec: null,
+                  freeze_duration_sec: 0,
+                  freeze_filter: "none",
+                })
+              }
             >
               Retirer le freeze
             </Button>
           </div>
         )}
         <p className="text-[10px] leading-snug text-muted-foreground">
-          Le freeze apparaît comme un segment ❄ à droite du clip dans
-          la timeline — drag son bord droit pour ajuster la durée.
-          Pour figer au milieu d&apos;un clip : place le playhead,
-          appuie sur <kbd className="rounded bg-muted px-1">S</kbd> pour
-          couper, puis ajoute un freeze à la première moitié.
+          Le freeze s&apos;insère <strong>dedans</strong> le clip et
+          ajoute sa durée. Visible comme une sous-barre turquoise dans
+          la timeline — drag pour bouger / redimensionner.
         </p>
       </Section>
 

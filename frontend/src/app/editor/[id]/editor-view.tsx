@@ -44,6 +44,26 @@ export function EditorView({ id }: { id: number }) {
   //   - Shift + ←/→  : nudge by 1 second
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // Undo / Redo : Ctrl+Z (undo), Ctrl+Shift+Z or Ctrl+Y (redo).
+      // Also accept Cmd on macOS keyboards out of habit. Allowed inside
+      // inputs/textareas — text fields already get the browser-native
+      // undo on Ctrl+Z, so we only intercept when the focus is OUT.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        const key = e.key.toLowerCase();
+        if (key === "z" && !e.shiftKey) {
+          if (isTypingTarget(e.target)) return;
+          e.preventDefault();
+          useEditorStore.getState().undo();
+          return;
+        }
+        if ((key === "z" && e.shiftKey) || key === "y") {
+          if (isTypingTarget(e.target)) return;
+          e.preventDefault();
+          useEditorStore.getState().redo();
+          return;
+        }
+      }
+
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (isTypingTarget(e.target)) return;
 

@@ -37,6 +37,43 @@ const SAVE_DEBOUNCE_MS = 500;
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
+// ----- undo / redo -------------------------------------------------------
+
+const MAX_HISTORY = 50;
+
+/** Subset of the store that's eligible for undo/redo — the "document"
+ *  (anything that the autosave persists). Pure ephemeral state like
+ *  currentTime / isPlaying / selection / saving flags is excluded. */
+type DocSnapshot = {
+  clips: Clip[];
+  extraTracks: ExtraTrack[];
+  layers: Layer[];
+  audioOverlay: AudioOverlayConfig;
+};
+
+function docSnapshot(s: {
+  clips: Clip[];
+  extraTracks: ExtraTrack[];
+  layers: Layer[];
+  audioOverlay: AudioOverlayConfig;
+}): DocSnapshot {
+  return {
+    clips: s.clips,
+    extraTracks: s.extraTracks,
+    layers: s.layers,
+    audioOverlay: s.audioOverlay,
+  };
+}
+
+function docChanged(a: DocSnapshot, b: DocSnapshot): boolean {
+  return (
+    a.clips !== b.clips ||
+    a.extraTracks !== b.extraTracks ||
+    a.layers !== b.layers ||
+    a.audioOverlay !== b.audioOverlay
+  );
+}
+
 type EditorState = {
   template: Template | null;
   clips: Clip[];
@@ -60,6 +97,15 @@ type EditorState = {
   fonts: FontMeta[];
   saving: boolean;
   saveError: string | null;
+
+  // ----- undo / redo (Phase 31) -----
+  past: DocSnapshot[];
+  future: DocSnapshot[];
+  /** True while undo/redo is in flight, so the auto-history subscriber
+   *  doesn't re-record the restored state into past. */
+  _isReplaying: boolean;
+  undo: () => void;
+  redo: () => void;
 
   loadTemplate: (template: Template) => void;
   loadFonts: (fonts: FontMeta[]) => void;
@@ -158,11 +204,39 @@ type EditorState = {
   saveNow: () => Promise<void>;
 };
 
+/** Compute a clip's "natural" duration (excl. freeze, excl. tail). */
+function naturalDur(clip: { type: string; trim_in?: number; trim_out?: number | null; source_duration_sec?: number | null; duration_sec?: number }): number {
+  if (clip.type === "fixed") {
+    if (clip.trim_out != null)
+      return Math.max(0, clip.trim_out - (clip.trim_in ?? 0));
+    return Math.max(0, (clip.source_duration_sec ?? 0) - (clip.trim_in ?? 0));
+  }
+  return Math.max(0, clip.duration_sec ?? 0);
+}
+
+/** Migrate the legacy `freeze_tail_sec` field to the new freeze model.
+ *  Old templates set freeze_tail_sec > 0 to hold the last frame after
+ *  the natural end. New model represents the same effect as a freeze
+ *  positioned AT the natural end. We only migrate when the new fields
+ *  are still untouched (avoid clobbering a user-set freeze_at). */
+function migrateFreeze<T extends { freeze_tail_sec?: number; freeze_at_sec?: number | null; freeze_duration_sec?: number } & Parameters<typeof naturalDur>[0]>(clip: T): T {
+  const tail = clip.freeze_tail_sec ?? 0;
+  if (tail > 0 && (clip.freeze_at_sec == null) && (clip.freeze_duration_sec ?? 0) === 0) {
+    return {
+      ...clip,
+      freeze_at_sec: naturalDur(clip),
+      freeze_duration_sec: tail,
+      freeze_tail_sec: 0,
+    };
+  }
+  return clip;
+}
+
 function parseClips(raw: unknown[]): Clip[] {
   const out: Clip[] = [];
   for (const item of raw) {
     const r = ClipSchema.safeParse(item);
-    if (r.success) out.push(r.data);
+    if (r.success) out.push(migrateFreeze(r.data) as Clip);
   }
   return out;
 }
@@ -196,7 +270,7 @@ function parseExtraTracks(raw: unknown): ExtraTrack[] {
     const clips: ExtraClip[] = [];
     for (const c of rawClips) {
       const r = ExtraClipSchema.safeParse(c);
-      if (r.success) clips.push(r.data);
+      if (r.success) clips.push(migrateFreeze(r.data) as ExtraClip);
     }
     out.push({ id, name, clips });
   }
@@ -204,6 +278,42 @@ function parseExtraTracks(raw: unknown): ExtraTrack[] {
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
+  past: [],
+  future: [],
+  _isReplaying: false,
+
+  undo: () => {
+    const s = get();
+    const last = s.past[s.past.length - 1];
+    if (!last) return;
+    const present = docSnapshot(s);
+    set({
+      _isReplaying: true,
+      past: s.past.slice(0, -1),
+      future: [...s.future, present],
+      ...last,
+    });
+    // Clear the flag on the next tick so any cascading store updates
+    // (e.g. selection clearing) don't re-trigger the auto-history push.
+    queueMicrotask(() => set({ _isReplaying: false }));
+    schedule(get);
+  },
+
+  redo: () => {
+    const s = get();
+    const next = s.future[s.future.length - 1];
+    if (!next) return;
+    const present = docSnapshot(s);
+    set({
+      _isReplaying: true,
+      past: [...s.past, present],
+      future: s.future.slice(0, -1),
+      ...next,
+    });
+    queueMicrotask(() => set({ _isReplaying: false }));
+    schedule(get);
+  },
+
   template: null,
   clips: [],
   extraTracks: [],
@@ -221,8 +331,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   saving: false,
   saveError: null,
 
-  loadTemplate: (template) =>
+  loadTemplate: (template) => {
+    // Loading a template is NOT an undoable action — we mark this
+    // mutation as a replay so the auto-history subscriber skips it,
+    // then we manually reset past/future and the lastDocSnap baseline.
     set({
+      _isReplaying: true,
       template,
       clips: parseClips(template.clips),
       extraTracks: parseExtraTracks(template.extra_tracks),
@@ -234,7 +348,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       audioSelected: false,
       currentTime: 0,
       isPlaying: false,
-    }),
+      past: [],
+      future: [],
+    });
+    queueMicrotask(() => set({ _isReplaying: false }));
+  },
 
   loadFonts: (fonts) => set({ fonts }),
 
@@ -331,44 +449,53 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       let firstHalf: Clip;
       let secondHalf: Clip;
 
-      // freeze_tail belongs to the END of the original clip → keep it on
-      // the second half only, reset on the first half so it doesn't
-      // freeze in the middle.
+      // Freeze belongs inside ONE clip — after a split we drop it on
+      // both halves (simpler than trying to route it) so the user can
+      // re-add it on whichever half they want.
+      const freezeReset = {
+        freeze_at_sec: null,
+        freeze_duration_sec: 0,
+        freeze_filter: "none" as const,
+        freeze_tail_sec: 0,
+      };
       if (clip.type === "fixed") {
         const cutSourceTime = clip.trim_in + localCut;
         firstHalf = {
           ...clip,
           trim_out: cutSourceTime,
-          freeze_tail_sec: 0,
+          ...freezeReset,
         } as Clip;
         secondHalf = {
           ...clip,
           id: crypto.randomUUID(),
           trim_in: cutSourceTime,
           trim_out: clip.trim_out,
+          ...freezeReset,
         } as Clip;
       } else if (clip.type === "image") {
         firstHalf = {
           ...clip,
           duration_sec: localCut,
-          freeze_tail_sec: 0,
+          ...freezeReset,
         } as Clip;
         secondHalf = {
           ...clip,
           id: crypto.randomUUID(),
           duration_sec: dur - localCut,
+          ...freezeReset,
         } as Clip;
       } else {
         // placeholder
         firstHalf = {
           ...clip,
           duration_sec: localCut,
-          freeze_tail_sec: 0,
+          ...freezeReset,
         } as Clip;
         secondHalf = {
           ...clip,
           id: crypto.randomUUID(),
           duration_sec: dur - localCut,
+          ...freezeReset,
         } as Clip;
       }
       const next = [...s.clips];
@@ -441,6 +568,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       filter: "none",
       filter_start_sec: null,
       filter_end_sec: null,
+      freeze_at_sec: null,
+      freeze_duration_sec: 0,
+      freeze_filter: "none",
       freeze_tail_sec: 0,
     };
     // Persist a clip-level "duration" via trim_out so the pipeline knows
@@ -491,6 +621,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       filter: "none",
       filter_start_sec: null,
       filter_end_sec: null,
+      freeze_at_sec: null,
+      freeze_duration_sec: 0,
+      freeze_filter: "none",
       freeze_tail_sec: 0,
     };
     let added = false;
@@ -532,6 +665,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       filter: "none",
       filter_start_sec: null,
       filter_end_sec: null,
+      freeze_at_sec: null,
+      freeze_duration_sec: 0,
+      freeze_filter: "none",
       freeze_tail_sec: 0,
     };
     let added = false;
@@ -605,14 +741,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
       let firstHalf: ExtraClip;
       let secondHalf: ExtraClip;
-      // freeze_tail belongs to the END of the original clip → keep on
-      // the second half, reset on the first.
+      // Same as splitMainClip — drop freeze on both halves to keep the
+      // semantics predictable.
+      const freezeReset = {
+        freeze_at_sec: null,
+        freeze_duration_sec: 0,
+        freeze_filter: "none" as const,
+        freeze_tail_sec: 0,
+      };
       if (clip.type === "fixed") {
         const cutSourceTime = clip.trim_in + localCut;
         firstHalf = {
           ...clip,
           trim_out: cutSourceTime,
-          freeze_tail_sec: 0,
+          ...freezeReset,
         } as ExtraClip;
         secondHalf = {
           ...clip,
@@ -620,18 +762,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           start_time: clip.start_time + localCut,
           trim_in: cutSourceTime,
           trim_out: clip.trim_out,
+          ...freezeReset,
         } as ExtraClip;
       } else {
         firstHalf = {
           ...clip,
           duration_sec: localCut,
-          freeze_tail_sec: 0,
+          ...freezeReset,
         } as ExtraClip;
         secondHalf = {
           ...clip,
           id: crypto.randomUUID(),
           start_time: clip.start_time + localCut,
           duration_sec: dur - localCut,
+          ...freezeReset,
         } as ExtraClip;
       }
       const newClips = [...track.clips];
@@ -793,3 +937,33 @@ async function persist(get: () => EditorState) {
     });
   }
 }
+
+// ----- auto-record undo history -----------------------------------------
+//
+// Subscribes once at module load. Whenever the "document" portion of the
+// store changes (clips / extraTracks / layers / audioOverlay reference
+// changes via setState), capture the PREVIOUS snapshot into the past
+// stack and clear the future. Skipped during undo/redo replay so the
+// restored state isn't immediately re-recorded.
+
+let _lastDocSnap: DocSnapshot = docSnapshot(useEditorStore.getState());
+
+useEditorStore.subscribe((state) => {
+  if (state._isReplaying) {
+    // Refresh our last snapshot so the next user action records the
+    // post-replay state as the new baseline.
+    _lastDocSnap = docSnapshot(state);
+    return;
+  }
+  const next = docSnapshot(state);
+  if (!docChanged(_lastDocSnap, next)) return;
+  // Capture the OLD snapshot (= what undo should restore to), then
+  // update our cached "last" to the new one. The new past array is
+  // capped to MAX_HISTORY to bound memory.
+  const captured = _lastDocSnap;
+  _lastDocSnap = next;
+  useEditorStore.setState({
+    past: [...state.past, captured].slice(-MAX_HISTORY),
+    future: [],
+  });
+});

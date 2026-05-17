@@ -87,14 +87,28 @@ export function fontFamily(fontId: FontId): string {
 // ===== clips =========================================================
 
 export function clipDuration(clip: Clip): number {
-  const freezeTail = Math.max(0, (clip as { freeze_tail_sec?: number }).freeze_tail_sec ?? 0);
+  const freezeMeta = clip as {
+    freeze_duration_sec?: number;
+    freeze_at_sec?: number | null;
+    freeze_tail_sec?: number;
+  };
+  const freezeActive =
+    freezeMeta.freeze_at_sec != null &&
+    (freezeMeta.freeze_duration_sec ?? 0) > 0;
+  // freeze adds duration ONLY when actually active (freeze_at_sec is
+  // set). The legacy freeze_tail_sec still extends the end for old
+  // unmigrated templates — once they're touched in the editor the
+  // migration converts them to freeze_at_sec/duration.
+  const freezeExtra = freezeActive
+    ? Math.max(0, freezeMeta.freeze_duration_sec ?? 0)
+    : Math.max(0, freezeMeta.freeze_tail_sec ?? 0);
   if (clip.type === "fixed") {
     if (clip.trim_out != null)
-      return Math.max(0, clip.trim_out - clip.trim_in) + freezeTail;
-    return Math.max(0, (clip.source_duration_sec ?? 0) - clip.trim_in) + freezeTail;
+      return Math.max(0, clip.trim_out - clip.trim_in) + freezeExtra;
+    return Math.max(0, (clip.source_duration_sec ?? 0) - clip.trim_in) + freezeExtra;
   }
   // image and placeholder both expose duration_sec
-  return Math.max(0, clip.duration_sec) + freezeTail;
+  return Math.max(0, clip.duration_sec) + freezeExtra;
 }
 
 export function totalDuration(clips: Clip[]): number {
@@ -195,6 +209,9 @@ export function makeFixedClip(
     filter: "none",
     filter_start_sec: null,
     filter_end_sec: null,
+    freeze_at_sec: null,
+    freeze_duration_sec: 0,
+    freeze_filter: "none",
     freeze_tail_sec: 0,
   };
 }
@@ -211,6 +228,9 @@ export function makePlaceholderClip(durationSec: number = 3.0): PlaceholderClip 
     filter: "none",
     filter_start_sec: null,
     filter_end_sec: null,
+    freeze_at_sec: null,
+    freeze_duration_sec: 0,
+    freeze_filter: "none",
     freeze_tail_sec: 0,
   };
 }
@@ -235,6 +255,9 @@ export function makeImageClip(
     filter: "none",
     filter_start_sec: null,
     filter_end_sec: null,
+    freeze_at_sec: null,
+    freeze_duration_sec: 0,
+    freeze_filter: "none",
     freeze_tail_sec: 0,
   };
 }

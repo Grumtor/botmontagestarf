@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Eye, Image as ImageIcon, Save } from "lucide-react";
+import { ArrowLeft, Eye, Image as ImageIcon, Redo2, Save, Undo2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,12 @@ export function EditorTopbar() {
   const saveNow = useEditorStore((s) => s.saveNow);
   const saving = useEditorStore((s) => s.saving);
   const saveError = useEditorStore((s) => s.saveError);
+  const past = useEditorStore((s) => s.past);
+  const future = useEditorStore((s) => s.future);
+  const undo = useEditorStore((s) => s.undo);
+  const redo = useEditorStore((s) => s.redo);
+  const canUndo = past.length > 0;
+  const canRedo = future.length > 0;
 
   const [renderOpen, setRenderOpen] = useState(false);
   const [renderLoading, setRenderLoading] = useState(false);
@@ -64,7 +70,7 @@ export function EditorTopbar() {
 
   return (
     <header className="flex h-[50px] shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-3">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1">
         <Button
           variant="ghost"
           size="icon"
@@ -73,6 +79,26 @@ export function EditorTopbar() {
           title="Retour aux templates"
         >
           <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={undo}
+          disabled={!canUndo}
+          aria-label="Annuler"
+          title="Annuler (Ctrl+Z)"
+        >
+          <Undo2 className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={redo}
+          disabled={!canRedo}
+          aria-label="Rétablir"
+          title="Rétablir (Ctrl+Shift+Z)"
+        >
+          <Redo2 className="h-4 w-4" />
         </Button>
       </div>
 

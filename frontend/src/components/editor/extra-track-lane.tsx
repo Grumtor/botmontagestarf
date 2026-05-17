@@ -155,23 +155,50 @@ export function ExtraTrackLane({
     window.addEventListener("mouseup", onUp);
   }
 
-  /** Drag the RIGHT edge of the freeze segment — adjusts freeze_tail_sec
-   *  with snap. Symmetric to the main-track ClipTrack version. */
-  function startFreezeTrim(e: React.MouseEvent, clip: ExtraClip) {
+  /** Compute the clip's natural duration (excl. freeze). */
+  function natDur(c: ExtraClip): number {
+    if (c.type === "fixed") {
+      if (c.trim_out != null) return Math.max(0, c.trim_out - c.trim_in);
+      return Math.max(0, (c.source_duration_sec ?? 0) - c.trim_in);
+    }
+    return Math.max(0, c.duration_sec);
+  }
+
+  /** Drag the freeze sub-segment body to move its position inside the
+   *  clip (freeze_at_sec). */
+  function startFreezeMove(e: React.MouseEvent, clip: ExtraClip) {
     e.preventDefault();
     e.stopPropagation();
     setSelectedExtraClip(track.id, clip.id);
     const startX = e.clientX;
-    const initFreeze = Math.max(0, clip.freeze_tail_sec ?? 0);
-    const natural = clipDuration(clip) - initFreeze;
-    const absStart = clip.start_time;
+    const initAt = clip.freeze_at_sec ?? 0;
+    const nd = natDur(clip);
 
     function onMove(ev: MouseEvent) {
       const dt = (ev.clientX - startX) / pxPerSec;
-      const proposedFreeze = Math.max(0, initFreeze + dt);
-      const snappedEnd = snapTime(absStart + natural + proposedFreeze);
-      const newFreeze = Math.max(0, snappedEnd - absStart - natural);
-      patchExtraClip(track.id, clip.id, { freeze_tail_sec: newFreeze });
+      const next = Math.max(0, Math.min(nd, initAt + dt));
+      patchExtraClip(track.id, clip.id, { freeze_at_sec: next });
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  /** Drag the right edge of the freeze sub-segment to resize. */
+  function startFreezeResize(e: React.MouseEvent, clip: ExtraClip) {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedExtraClip(track.id, clip.id);
+    const startX = e.clientX;
+    const initDur = Math.max(0.1, clip.freeze_duration_sec ?? 0);
+
+    function onMove(ev: MouseEvent) {
+      const dt = (ev.clientX - startX) / pxPerSec;
+      const next = Math.max(0.1, initDur + dt);
+      patchExtraClip(track.id, clip.id, { freeze_duration_sec: next });
     }
     function onUp() {
       window.removeEventListener("mousemove", onMove);
@@ -351,14 +378,18 @@ export function ExtraTrackLane({
       {/* Clips */}
       {track.clips.map((c) => {
         const totalDur = clipDuration(c);
-        const freezeTail = Math.max(0, c.freeze_tail_sec ?? 0);
-        const naturalDur = Math.max(0, totalDur - freezeTail);
+        const freezeActive =
+          c.freeze_at_sec != null && (c.freeze_duration_sec ?? 0) > 0;
+        const freezeAt = freezeActive ? (c.freeze_at_sec ?? 0) : 0;
+        const freezeDur = freezeActive
+          ? Math.max(0, c.freeze_duration_sec ?? 0)
+          : 0;
+        const naturalDur = totalDur - freezeDur;
         const isSelected =
           selectedClipId === c.id && selectedExtraTrackId === track.id;
         const isAudioOnly = c.video_enabled === false;
         const left = c.start_time * pxPerSec;
-        const w = Math.max(2, naturalDur * pxPerSec);
-        const wFreeze = freezeTail * pxPerSec;
+        const w = Math.max(2, totalDur * pxPerSec);
         // Phase 26c — palette identique à la main track pour cohérence.
         // Phase 28 — quand video_enabled=false (audio only), on diagonale
         // le fond pour signaler visuellement.
@@ -444,37 +475,37 @@ export function ExtraTrackLane({
               </div>
             </div>
 
-            {/* Freeze tail segment — same UX as the main track. */}
-            {freezeTail > 0 && wFreeze > 0 && (
+            {/* Freeze sub-segment INSIDE the clip at freeze_at_sec.
+                Drag body = move position. Drag right edge = resize. */}
+            {freezeActive && (
               <div
+                onMouseDown={(e) => startFreezeMove(e, c)}
                 onClick={(e) => {
                   e.stopPropagation();
                   setSelectedExtraClip(track.id, c.id);
                 }}
                 className={cn(
-                  "absolute top-1.5 overflow-hidden rounded border border-cyan-300/70 bg-cyan-900/40 transition",
+                  "absolute top-1.5 z-[2] cursor-grab overflow-hidden rounded border border-cyan-300/80 bg-cyan-900/60 backdrop-blur-[1px] transition",
                   isSelected && "ring-1 ring-foreground/70",
                 )}
                 style={{
-                  left: left + w,
-                  width: Math.max(wFreeze, 6),
+                  left: left + freezeAt * pxPerSec,
+                  width: Math.max(freezeDur * pxPerSec, 6),
                   height: height - 8,
-                  backgroundImage: thumbUrl ? `url(${thumbUrl})` : undefined,
-                  backgroundSize: "auto 100%",
-                  backgroundRepeat: "no-repeat",
-                  backgroundPosition: "right center",
                 }}
-                title={`Image figée · ${freezeTail.toFixed(1)}s`}
+                title={`❄ Freeze · ${freezeDur.toFixed(1)}s @ ${freezeAt.toFixed(1)}s${(c.freeze_filter ?? "none") === "bw" ? " · N&B" : ""}`}
               >
-                <div className="absolute inset-0 bg-cyan-950/60" />
                 <div
-                  onMouseDown={(e) => startFreezeTrim(e, c)}
-                  className="absolute right-0 top-0 z-10 h-full w-1.5 cursor-ew-resize bg-cyan-200/50 hover:bg-cyan-100/80"
+                  onMouseDown={(e) => startFreezeResize(e, c)}
+                  className="absolute right-0 top-0 z-10 h-full w-1.5 cursor-ew-resize bg-cyan-200/70 hover:bg-cyan-100"
                 />
                 <div className="absolute left-1 top-1 z-[1] flex items-center gap-1 rounded bg-cyan-950/80 px-1 py-0.5 text-[9px] text-cyan-100">
                   <Snowflake className="h-3 w-3" />
-                  {wFreeze > 50 && (
-                    <span className="truncate">{freezeTail.toFixed(1)}s</span>
+                  {freezeDur * pxPerSec > 50 && (
+                    <span className="truncate">
+                      {freezeDur.toFixed(1)}s
+                      {(c.freeze_filter ?? "none") === "bw" ? " · N&B" : ""}
+                    </span>
                   )}
                 </div>
               </div>

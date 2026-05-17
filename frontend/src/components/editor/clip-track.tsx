@@ -63,28 +63,54 @@ export function ClipTrack({ pxPerSec, width, height, snapPoints }: Props) {
     return best;
   }
 
-  /** Drag the right edge of the freeze segment to extend/shrink the
-   *  freeze_tail_sec of the parent clip. Same snap behavior as regular
-   *  trim handles. Minimum 0.1s (the segment disappears below that). */
-  function startFreezeTrim(e: React.MouseEvent, clipIdx: number) {
+  /** Compute the clip's natural (no-freeze) duration. */
+  function natDur(clip: import("@/lib/api").Clip): number {
+    if (clip.type === "fixed") {
+      if (clip.trim_out != null)
+        return Math.max(0, clip.trim_out - clip.trim_in);
+      return Math.max(0, (clip.source_duration_sec ?? 0) - clip.trim_in);
+    }
+    return Math.max(0, clip.duration_sec);
+  }
+
+  /** Drag the freeze sub-segment to move its position inside the clip
+   *  (freeze_at_sec). Range: [0, naturalDur]. */
+  function startFreezeMove(e: React.MouseEvent, clipIdx: number) {
     e.preventDefault();
     e.stopPropagation();
     const clip = clips[clipIdx];
     setSelected(clip.id);
     const startX = e.clientX;
-    const clipAbsStart = starts[clipIdx];
-    const naturalDur =
-      clipDuration(clip) - Math.max(0, clip.freeze_tail_sec ?? 0);
-    const initFreeze = Math.max(0, clip.freeze_tail_sec ?? 0);
+    const initAt = clip.freeze_at_sec ?? 0;
+    const nd = natDur(clip);
 
     function onMove(ev: MouseEvent) {
       const dt = (ev.clientX - startX) / pxPerSec;
-      const proposedFreeze = Math.max(0, initFreeze + dt);
-      const snappedAbsEnd = snapAbsTime(
-        clipAbsStart + naturalDur + proposedFreeze,
-      );
-      const newFreeze = Math.max(0, snappedAbsEnd - clipAbsStart - naturalDur);
-      patchClip(clip.id, { freeze_tail_sec: newFreeze });
+      const next = Math.max(0, Math.min(nd, initAt + dt));
+      patchClip(clip.id, { freeze_at_sec: next });
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  /** Drag the right edge of the freeze sub-segment to change its
+   *  duration (freeze_duration_sec). */
+  function startFreezeResize(e: React.MouseEvent, clipIdx: number) {
+    e.preventDefault();
+    e.stopPropagation();
+    const clip = clips[clipIdx];
+    setSelected(clip.id);
+    const startX = e.clientX;
+    const initDur = Math.max(0.1, clip.freeze_duration_sec ?? 0);
+
+    function onMove(ev: MouseEvent) {
+      const dt = (ev.clientX - startX) / pxPerSec;
+      const next = Math.max(0.1, initDur + dt);
+      patchClip(clip.id, { freeze_duration_sec: next });
     }
     function onUp() {
       window.removeEventListener("mousemove", onMove);
@@ -231,11 +257,15 @@ export function ClipTrack({ pxPerSec, width, height, snapPoints }: Props) {
 
       {clips.map((clip, i) => {
         const totalDur = clipDuration(clip);
-        const freezeTail = Math.max(0, clip.freeze_tail_sec ?? 0);
-        const naturalDur = Math.max(0, totalDur - freezeTail);
+        const freezeActive =
+          clip.freeze_at_sec != null && (clip.freeze_duration_sec ?? 0) > 0;
+        const freezeAt = freezeActive ? (clip.freeze_at_sec ?? 0) : 0;
+        const freezeDur = freezeActive
+          ? Math.max(0, clip.freeze_duration_sec ?? 0)
+          : 0;
+        const naturalDur = totalDur - freezeDur;
         const left = starts[i] * pxPerSec;
-        const wNatural = Math.max(naturalDur * pxPerSec, 8);
-        const wFreeze = freezeTail * pxPerSec;
+        const wTotal = Math.max(totalDur * pxPerSec, 8);
         const isPlaceholder = clip.type === "placeholder";
         const isImage = clip.type === "image";
         const isFixed = clip.type === "fixed";
@@ -286,7 +316,7 @@ export function ClipTrack({ pxPerSec, width, height, snapPoints }: Props) {
               )}
               style={{
                 left,
-                width: wNatural,
+                width: wTotal,
                 height: "calc(100% - 8px)",
                 backgroundImage: thumbUrl ? `url(${thumbUrl})` : undefined,
                 backgroundSize: isFixed
@@ -298,11 +328,13 @@ export function ClipTrack({ pxPerSec, width, height, snapPoints }: Props) {
                 backgroundPosition: "center",
               }}
               title={
-                isPlaceholder
-                  ? `Placeholder · ${naturalDur.toFixed(1)}s`
-                  : isImage
-                    ? `Image · ${naturalDur.toFixed(1)}s`
-                    : `Clip · ${naturalDur.toFixed(1)}s`
+                freezeActive
+                  ? `${isPlaceholder ? "Placeholder" : isImage ? "Image" : "Clip"} · ${naturalDur.toFixed(1)}s + freeze ${freezeDur.toFixed(1)}s`
+                  : isPlaceholder
+                    ? `Placeholder · ${naturalDur.toFixed(1)}s`
+                    : isImage
+                      ? `Image · ${naturalDur.toFixed(1)}s`
+                      : `Clip · ${naturalDur.toFixed(1)}s`
               }
             >
               <div
@@ -341,43 +373,42 @@ export function ClipTrack({ pxPerSec, width, height, snapPoints }: Props) {
               </div>
             </div>
 
-            {/* Freeze tail segment — visible only when freeze_tail_sec > 0.
-                Behaves like a small attached clip with its own right
-                handle that adjusts freeze_tail_sec. Background = last
-                frame thumbnail (filmstrip endpoint serves a strip but the
-                browser-stretched image gives a passable still here). */}
-            {freezeTail > 0 && wFreeze > 0 && (
+            {/* Freeze sub-segment — visible only when freeze_at_sec is
+                set. Positioned INSIDE the clip body at freeze_at_sec
+                (timeline-mapped), with width = freeze_duration_sec.
+                Drag the body to move position, drag the right edge to
+                resize the duration. The freeze_filter (B&W independent)
+                is reflected by a small ❄ + bw icon at the top-left. */}
+            {freezeActive && (
               <div
+                onMouseDown={(e) => startFreezeMove(e, i)}
                 onClick={(e) => {
                   e.stopPropagation();
                   setSelected(clip.id);
                 }}
                 className={cn(
-                  "absolute top-1 cursor-pointer overflow-hidden rounded-md border border-cyan-300/70 bg-cyan-900/40 transition",
+                  "absolute top-1 z-[2] cursor-grab overflow-hidden rounded border border-cyan-300/80 bg-cyan-900/60 backdrop-blur-[1px] transition",
                   isSelected && "ring-1 ring-foreground/70",
                 )}
                 style={{
-                  left: left + wNatural,
-                  width: Math.max(wFreeze, 6),
+                  left: left + freezeAt * pxPerSec,
+                  width: Math.max(freezeDur * pxPerSec, 6),
                   height: "calc(100% - 8px)",
-                  backgroundImage: thumbUrl ? `url(${thumbUrl})` : undefined,
-                  backgroundSize: "auto 100%",
-                  backgroundRepeat: "no-repeat",
-                  // Show the LAST portion of the filmstrip = closest to
-                  // the frame we'll freeze.
-                  backgroundPosition: "right center",
                 }}
-                title={`Image figée · ${freezeTail.toFixed(1)}s`}
+                title={`❄ Freeze · ${freezeDur.toFixed(1)}s @ ${freezeAt.toFixed(1)}s${(clip.freeze_filter ?? "none") === "bw" ? " · N&B" : ""}`}
               >
-                <div className="absolute inset-0 bg-cyan-950/60" />
+                {/* Right-edge handle = resize freeze duration */}
                 <div
-                  onMouseDown={(e) => startFreezeTrim(e, i)}
-                  className="absolute right-0 top-0 z-10 h-full w-2 cursor-ew-resize bg-cyan-200/50 hover:bg-cyan-100/80"
+                  onMouseDown={(e) => startFreezeResize(e, i)}
+                  className="absolute right-0 top-0 z-10 h-full w-1.5 cursor-ew-resize bg-cyan-200/70 hover:bg-cyan-100"
                 />
-                <div className="absolute left-1.5 top-1.5 z-[1] flex items-center gap-1 rounded bg-cyan-950/80 px-1 py-0.5 text-[9px] text-cyan-100">
+                <div className="absolute left-1 top-1 z-[1] flex items-center gap-1 rounded bg-cyan-950/80 px-1 py-0.5 text-[9px] text-cyan-100">
                   <Snowflake className="h-3 w-3" />
-                  {wFreeze > 50 && (
-                    <span className="truncate">{freezeTail.toFixed(1)}s</span>
+                  {freezeDur * pxPerSec > 50 && (
+                    <span className="truncate">
+                      {freezeDur.toFixed(1)}s
+                      {(clip.freeze_filter ?? "none") === "bw" ? " · N&B" : ""}
+                    </span>
                   )}
                 </div>
               </div>

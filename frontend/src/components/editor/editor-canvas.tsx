@@ -183,16 +183,34 @@ export function EditorCanvas() {
   const activeClip = active ? clips[active.clipIndex] : null;
   const activeIsFixed = activeClip?.type === "fixed";
   const activeIsImage = activeClip?.type === "image";
-  // B&W filter style — respects the optional sub-range. localTime is
-  // the time within the active clip (after trim_in offset), matching
-  // what the ffmpeg pipeline uses as `t`.
+  // B&W filter style — respects:
+  //   * the in-clip freeze window (freeze_filter applies inside the
+  //     freeze [freeze_at, freeze_at + freeze_duration])
+  //   * the optional clip-wide filter range (filter_start_sec /
+  //     filter_end_sec)
+  // localTime is the time within the active clip (output time including
+  // the freeze, since clipDuration counts freeze duration too).
   const activeFilterStyle = (() => {
-    if (!activeClip || (activeClip.filter ?? "none") !== "bw") return undefined;
+    if (!activeClip) return undefined;
+    const local = active?.localTime ?? 0;
+    const freezeAt = activeClip.freeze_at_sec;
+    const freezeDur = Math.max(0, activeClip.freeze_duration_sec ?? 0);
+    const inFreeze =
+      freezeAt != null &&
+      freezeDur > 0 &&
+      local >= freezeAt &&
+      local <= freezeAt + freezeDur;
+    if (inFreeze) {
+      // Inside the freeze window: only the freeze_filter matters.
+      return (activeClip.freeze_filter ?? "none") === "bw"
+        ? { filter: "grayscale(1)" }
+        : undefined;
+    }
+    if ((activeClip.filter ?? "none") !== "bw") return undefined;
     const fs = activeClip.filter_start_sec;
     const fe = activeClip.filter_end_sec;
     const hasRange = fs != null && fe != null && fe > fs && fs >= 0;
     if (!hasRange) return { filter: "grayscale(1)" };
-    const local = active?.localTime ?? 0;
     return local >= fs && local <= fe ? { filter: "grayscale(1)" } : undefined;
   })();
 
@@ -202,8 +220,12 @@ export function EditorCanvas() {
       : null;
 
   // When src changes, reload video. When playing, ensure local seek + play.
-  // Cap source seek to (source_duration - trim_in) so freeze_tail_sec
-  // appears as a held last frame in the preview.
+  // Output time → source time mapping with in-clip freeze:
+  //   * Before freeze_at: source = trim_in + outputLocal
+  //   * Inside the freeze [freeze_at, freeze_at + freeze_dur]:
+  //     source = trim_in + freeze_at (held frame)
+  //   * After the freeze: source = trim_in + (outputLocal - freeze_dur)
+  // Also caps at the natural end for legacy freeze_tail_sec.
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !activeFileUrl || !activeClip || activeClip.type !== "fixed") return;
@@ -211,7 +233,17 @@ export function EditorCanvas() {
       activeClip.trim_out != null
         ? Math.max(0, activeClip.trim_out - activeClip.trim_in)
         : Math.max(0, (activeClip.source_duration_sec ?? 0) - activeClip.trim_in);
-    const local = Math.min(active?.localTime ?? 0, naturalDur);
+    let local = active?.localTime ?? 0;
+    const freezeAt = activeClip.freeze_at_sec;
+    const freezeDur = Math.max(0, activeClip.freeze_duration_sec ?? 0);
+    if (freezeAt != null && freezeDur > 0) {
+      if (local >= freezeAt && local <= freezeAt + freezeDur) {
+        local = freezeAt; // held frame
+      } else if (local > freezeAt + freezeDur) {
+        local = local - freezeDur; // skip the freeze window in source
+      }
+    }
+    local = Math.min(local, naturalDur);
     const sourceTime = activeClip.trim_in + local;
     if (Math.abs(v.currentTime - sourceTime) > 0.2) {
       try {
