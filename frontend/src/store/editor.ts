@@ -331,9 +331,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       let firstHalf: Clip;
       let secondHalf: Clip;
 
+      // freeze_tail belongs to the END of the original clip → keep it on
+      // the second half only, reset on the first half so it doesn't
+      // freeze in the middle.
       if (clip.type === "fixed") {
         const cutSourceTime = clip.trim_in + localCut;
-        firstHalf = { ...clip, trim_out: cutSourceTime } as Clip;
+        firstHalf = {
+          ...clip,
+          trim_out: cutSourceTime,
+          freeze_tail_sec: 0,
+        } as Clip;
         secondHalf = {
           ...clip,
           id: crypto.randomUUID(),
@@ -341,7 +348,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           trim_out: clip.trim_out,
         } as Clip;
       } else if (clip.type === "image") {
-        firstHalf = { ...clip, duration_sec: localCut } as Clip;
+        firstHalf = {
+          ...clip,
+          duration_sec: localCut,
+          freeze_tail_sec: 0,
+        } as Clip;
         secondHalf = {
           ...clip,
           id: crypto.randomUUID(),
@@ -349,7 +360,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         } as Clip;
       } else {
         // placeholder
-        firstHalf = { ...clip, duration_sec: localCut } as Clip;
+        firstHalf = {
+          ...clip,
+          duration_sec: localCut,
+          freeze_tail_sec: 0,
+        } as Clip;
         secondHalf = {
           ...clip,
           id: crypto.randomUUID(),
@@ -423,6 +438,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       source_duration_sec: sourceDuration,
       source_width: width,
       source_height: height,
+      filter: "none",
+      freeze_tail_sec: 0,
     };
     // Persist a clip-level "duration" via trim_out so the pipeline knows
     // when the clip ends on the timeline. We use trim_out = trim_in + dur.
@@ -469,6 +486,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       video_enabled: true,
       source_width: width,
       source_height: height,
+      filter: "none",
+      freeze_tail_sec: 0,
     };
     let added = false;
     set((s) => {
@@ -506,6 +525,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       audio_enabled: true,
       audio_volume: 1.0,
       video_enabled: true,
+      filter: "none",
+      freeze_tail_sec: 0,
     };
     let added = false;
     set((s) => {
@@ -578,9 +599,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
       let firstHalf: ExtraClip;
       let secondHalf: ExtraClip;
+      // freeze_tail belongs to the END of the original clip → keep on
+      // the second half, reset on the first.
       if (clip.type === "fixed") {
         const cutSourceTime = clip.trim_in + localCut;
-        firstHalf = { ...clip, trim_out: cutSourceTime } as ExtraClip;
+        firstHalf = {
+          ...clip,
+          trim_out: cutSourceTime,
+          freeze_tail_sec: 0,
+        } as ExtraClip;
         secondHalf = {
           ...clip,
           id: crypto.randomUUID(),
@@ -589,7 +616,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           trim_out: clip.trim_out,
         } as ExtraClip;
       } else {
-        firstHalf = { ...clip, duration_sec: localCut } as ExtraClip;
+        firstHalf = {
+          ...clip,
+          duration_sec: localCut,
+          freeze_tail_sec: 0,
+        } as ExtraClip;
         secondHalf = {
           ...clip,
           id: crypto.randomUUID(),

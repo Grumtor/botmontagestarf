@@ -192,6 +192,8 @@ export function makeFixedClip(
     trim_out: durationSec,
     audio_enabled: true,
     audio_volume: 1.0,
+    filter: "none",
+    freeze_tail_sec: 0,
   };
 }
 
@@ -204,6 +206,8 @@ export function makePlaceholderClip(durationSec: number = 3.0): PlaceholderClip 
     trim_out: null,
     audio_enabled: true,
     audio_volume: 1.0,
+    filter: "none",
+    freeze_tail_sec: 0,
   };
 }
 
@@ -224,5 +228,7 @@ export function makeImageClip(
     trim_out: null,
     audio_enabled: false,
     audio_volume: 0,
+    filter: "none",
+    freeze_tail_sec: 0,
   };
 }
