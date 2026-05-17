@@ -68,8 +68,16 @@ async def upload_user_video(file: UploadFile = File(...)) -> UploadResponse:
     frontend embeds in subsequent /preview or /batch requests."""
     original = file.filename or "video.mp4"
     ext = Path(original).suffix.lower()
+    log.info(
+        "upload_user_video start: filename=%r ext=%r content_type=%r",
+        original, ext, file.content_type,
+    )
     if ext not in ALLOWED_USER_VIDEO_EXTS:
         raise HTTPException(400, f"Unsupported extension {ext!r}; allowed: mp4, mov")
+
+    # Defensive: ensure /data/temp/ exists. install_data() runs at
+    # startup but a fresh volume / re-deploy could leave it missing.
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
     token = uuid.uuid4().hex
     dest = TEMP_DIR / f"{token}{ext}"
@@ -90,7 +98,20 @@ async def upload_user_video(file: UploadFile = File(...)) -> UploadResponse:
     except HTTPException:
         dest.unlink(missing_ok=True)
         raise
+    except Exception as e:
+        # Log the full traceback server-side and surface type+message
+        # to the caller instead of an opaque "Internal Server Error".
+        log.exception(
+            "upload_user_video failed for %r after %d bytes",
+            original, total,
+        )
+        dest.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Upload failed: {type(e).__name__}: {e}",
+        )
 
+    log.info("upload_user_video done: token=%s ext=%s bytes=%d", token, ext, total)
     return UploadResponse(token=token)
 
 

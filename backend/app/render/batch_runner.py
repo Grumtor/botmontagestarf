@@ -486,7 +486,21 @@ def gather_render_inputs(
             audio_volume_x = float(clip.get("audio_volume", 1.0))
             video_enabled_x = bool(clip.get("video_enabled", True))
             start_time = float(clip.get("start_time", 0))
-            duration_sec = float(clip.get("duration_sec", 3.0))
+            # duration_sec: explicit field wins. For fixed extra clips
+            # the frontend stores the timeline duration implicitly via
+            # trim_out (see editor.ts addExtraFixedClip), so fall back
+            # to trim_out - trim_in. Without this fallback, fixed clips
+            # added without manual trimming defaulted to 3.0s and got
+            # their audio chopped at 3s in the render pipeline.
+            raw_dur = clip.get("duration_sec")
+            if raw_dur is not None:
+                duration_sec = float(raw_dur)
+            else:
+                ti = float(clip.get("trim_in") or 0)
+                to = clip.get("trim_out")
+                duration_sec = (
+                    max(0.1, float(to) - ti) if to is not None else 3.0
+                )
 
             if ctype == "fixed" or ctype == "image":
                 file_id = clip.get("file_id")
