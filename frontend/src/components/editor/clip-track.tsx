@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Film, ImageIcon, Square } from "lucide-react";
+import { Fragment, useRef, useState } from "react";
+import { Film, ImageIcon, Snowflake, Square } from "lucide-react";
 
 import { Templates } from "@/lib/api";
 import { useEditorStore } from "@/store/editor";
@@ -61,6 +61,37 @@ export function ClipTrack({ pxPerSec, width, height, snapPoints }: Props) {
       }
     }
     return best;
+  }
+
+  /** Drag the right edge of the freeze segment to extend/shrink the
+   *  freeze_tail_sec of the parent clip. Same snap behavior as regular
+   *  trim handles. Minimum 0.1s (the segment disappears below that). */
+  function startFreezeTrim(e: React.MouseEvent, clipIdx: number) {
+    e.preventDefault();
+    e.stopPropagation();
+    const clip = clips[clipIdx];
+    setSelected(clip.id);
+    const startX = e.clientX;
+    const clipAbsStart = starts[clipIdx];
+    const naturalDur =
+      clipDuration(clip) - Math.max(0, clip.freeze_tail_sec ?? 0);
+    const initFreeze = Math.max(0, clip.freeze_tail_sec ?? 0);
+
+    function onMove(ev: MouseEvent) {
+      const dt = (ev.clientX - startX) / pxPerSec;
+      const proposedFreeze = Math.max(0, initFreeze + dt);
+      const snappedAbsEnd = snapAbsTime(
+        clipAbsStart + naturalDur + proposedFreeze,
+      );
+      const newFreeze = Math.max(0, snappedAbsEnd - clipAbsStart - naturalDur);
+      patchClip(clip.id, { freeze_tail_sec: newFreeze });
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
   }
 
   function startTrim(
@@ -199,9 +230,12 @@ export function ClipTrack({ pxPerSec, width, height, snapPoints }: Props) {
       )}
 
       {clips.map((clip, i) => {
-        const dur = clipDuration(clip);
+        const totalDur = clipDuration(clip);
+        const freezeTail = Math.max(0, clip.freeze_tail_sec ?? 0);
+        const naturalDur = Math.max(0, totalDur - freezeTail);
         const left = starts[i] * pxPerSec;
-        const w = Math.max(dur * pxPerSec, 8);
+        const wNatural = Math.max(naturalDur * pxPerSec, 8);
+        const wFreeze = freezeTail * pxPerSec;
         const isPlaceholder = clip.type === "placeholder";
         const isImage = clip.type === "image";
         const isFixed = clip.type === "fixed";
@@ -220,94 +254,135 @@ export function ClipTrack({ pxPerSec, width, height, snapPoints }: Props) {
               : null;
 
         return (
-          <div
-            key={clip.id}
-            draggable
-            onDragStart={(e) => {
-              setDragIdx(i);
-              e.dataTransfer.effectAllowed = "move";
-              e.dataTransfer.setData("text/plain", String(i));
-            }}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              const fromStr = e.dataTransfer.getData("text/plain");
-              const from = Number(fromStr);
-              if (Number.isFinite(from) && from !== i) reorder(from, i);
-              setDragIdx(null);
-            }}
-            onDragEnd={() => setDragIdx(null)}
-            onClick={(e) => {
-              e.stopPropagation();
-              setSelected(clip.id);
-            }}
-            className={cn(
-              "absolute top-1 cursor-pointer overflow-hidden rounded-md border-2 transition",
-              isPlaceholder
-                ? "border-dashed border-yellow-500/70 bg-yellow-700/30"
-                : isImage
-                  ? "border-solid border-transparent bg-emerald-700/80 hover:bg-emerald-600/80"
-                  : "border-solid border-transparent bg-violet-700/80 hover:bg-violet-600/80",
-              isSelected && "border-foreground shadow-lg",
-            )}
-            style={{
-              left,
-              width: w,
-              height: "calc(100% - 8px)",
-              backgroundImage: thumbUrl ? `url(${thumbUrl})` : undefined,
-              // Phase 27 — filmstrip stretched 100% horizontally so each
-              // frame slot lines up with its time position on the clip.
-              backgroundSize: isFixed
-                ? "100% 100%"
-                : isImage
-                  ? "cover"
-                  : "auto 100%",
-              backgroundRepeat: "no-repeat",
-              backgroundPosition: "center",
-            }}
-            title={
-              isPlaceholder
-                ? `Placeholder · ${dur.toFixed(1)}s`
-                : isImage
-                  ? `Image · ${dur.toFixed(1)}s`
-                  : `Clip · ${dur.toFixed(1)}s`
-            }
-          >
+          <Fragment key={clip.id}>
             <div
+              draggable
+              onDragStart={(e) => {
+                setDragIdx(i);
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", String(i));
+              }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const fromStr = e.dataTransfer.getData("text/plain");
+                const from = Number(fromStr);
+                if (Number.isFinite(from) && from !== i) reorder(from, i);
+                setDragIdx(null);
+              }}
+              onDragEnd={() => setDragIdx(null)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelected(clip.id);
+              }}
               className={cn(
-                "absolute inset-0",
-                isPlaceholder ? "bg-yellow-700/30" : "bg-black/30",
-              )}
-            />
-
-            <div
-              onMouseDown={(e) => startTrim(e, i, "left")}
-              className="absolute left-0 top-0 z-10 h-full w-2 cursor-ew-resize bg-foreground/30 hover:bg-foreground/60"
-            />
-            <div
-              onMouseDown={(e) => startTrim(e, i, "right")}
-              className="absolute right-0 top-0 z-10 h-full w-2 cursor-ew-resize bg-foreground/30 hover:bg-foreground/60"
-            />
-
-            <div className="absolute left-3 top-1.5 z-[1] flex items-center gap-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
-              {isPlaceholder ? (
-                <Square className="h-3 w-3" />
-              ) : isImage ? (
-                <ImageIcon className="h-3 w-3" />
-              ) : (
-                <Film className="h-3 w-3" />
-              )}
-              <span className="truncate">
-                {isPlaceholder
-                  ? "Placeholder"
+                "absolute top-1 cursor-pointer overflow-hidden rounded-md border-2 transition",
+                isPlaceholder
+                  ? "border-dashed border-yellow-500/70 bg-yellow-700/30"
                   : isImage
-                    ? `Image ${i + 1}`
-                    : `Clip ${i + 1}`}
-                {" · "}
-                {dur.toFixed(1)}s
-              </span>
+                    ? "border-solid border-transparent bg-emerald-700/80 hover:bg-emerald-600/80"
+                    : "border-solid border-transparent bg-violet-700/80 hover:bg-violet-600/80",
+                isSelected && "border-foreground shadow-lg",
+              )}
+              style={{
+                left,
+                width: wNatural,
+                height: "calc(100% - 8px)",
+                backgroundImage: thumbUrl ? `url(${thumbUrl})` : undefined,
+                backgroundSize: isFixed
+                  ? "100% 100%"
+                  : isImage
+                    ? "cover"
+                    : "auto 100%",
+                backgroundRepeat: "no-repeat",
+                backgroundPosition: "center",
+              }}
+              title={
+                isPlaceholder
+                  ? `Placeholder · ${naturalDur.toFixed(1)}s`
+                  : isImage
+                    ? `Image · ${naturalDur.toFixed(1)}s`
+                    : `Clip · ${naturalDur.toFixed(1)}s`
+              }
+            >
+              <div
+                className={cn(
+                  "absolute inset-0",
+                  isPlaceholder ? "bg-yellow-700/30" : "bg-black/30",
+                )}
+              />
+
+              <div
+                onMouseDown={(e) => startTrim(e, i, "left")}
+                className="absolute left-0 top-0 z-10 h-full w-2 cursor-ew-resize bg-foreground/30 hover:bg-foreground/60"
+              />
+              <div
+                onMouseDown={(e) => startTrim(e, i, "right")}
+                className="absolute right-0 top-0 z-10 h-full w-2 cursor-ew-resize bg-foreground/30 hover:bg-foreground/60"
+              />
+
+              <div className="absolute left-3 top-1.5 z-[1] flex items-center gap-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">
+                {isPlaceholder ? (
+                  <Square className="h-3 w-3" />
+                ) : isImage ? (
+                  <ImageIcon className="h-3 w-3" />
+                ) : (
+                  <Film className="h-3 w-3" />
+                )}
+                <span className="truncate">
+                  {isPlaceholder
+                    ? "Placeholder"
+                    : isImage
+                      ? `Image ${i + 1}`
+                      : `Clip ${i + 1}`}
+                  {" · "}
+                  {naturalDur.toFixed(1)}s
+                </span>
+              </div>
             </div>
-          </div>
+
+            {/* Freeze tail segment — visible only when freeze_tail_sec > 0.
+                Behaves like a small attached clip with its own right
+                handle that adjusts freeze_tail_sec. Background = last
+                frame thumbnail (filmstrip endpoint serves a strip but the
+                browser-stretched image gives a passable still here). */}
+            {freezeTail > 0 && wFreeze > 0 && (
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelected(clip.id);
+                }}
+                className={cn(
+                  "absolute top-1 cursor-pointer overflow-hidden rounded-md border border-cyan-300/70 bg-cyan-900/40 transition",
+                  isSelected && "ring-1 ring-foreground/70",
+                )}
+                style={{
+                  left: left + wNatural,
+                  width: Math.max(wFreeze, 6),
+                  height: "calc(100% - 8px)",
+                  backgroundImage: thumbUrl ? `url(${thumbUrl})` : undefined,
+                  backgroundSize: "auto 100%",
+                  backgroundRepeat: "no-repeat",
+                  // Show the LAST portion of the filmstrip = closest to
+                  // the frame we'll freeze.
+                  backgroundPosition: "right center",
+                }}
+                title={`Image figée · ${freezeTail.toFixed(1)}s`}
+              >
+                <div className="absolute inset-0 bg-cyan-950/60" />
+                <div
+                  onMouseDown={(e) => startFreezeTrim(e, i)}
+                  className="absolute right-0 top-0 z-10 h-full w-2 cursor-ew-resize bg-cyan-200/50 hover:bg-cyan-100/80"
+                />
+                <div className="absolute left-1.5 top-1.5 z-[1] flex items-center gap-1 rounded bg-cyan-950/80 px-1 py-0.5 text-[9px] text-cyan-100">
+                  <Snowflake className="h-3 w-3" />
+                  {wFreeze > 50 && (
+                    <span className="truncate">{freezeTail.toFixed(1)}s</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </Fragment>
         );
       })}
     </div>

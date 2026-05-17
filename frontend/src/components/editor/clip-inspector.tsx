@@ -337,17 +337,40 @@ export function ClipInspector({ clip, extraTrackId }: Props) {
           </div>
         )}
 
-        <NumberField
-          label="Geler la dernière image (sec)"
-          value={clip.freeze_tail_sec ?? 0}
-          step={0.1}
-          onChange={(v) =>
-            patchClip(clip.id, { freeze_tail_sec: Math.max(0, v) })
-          }
-        />
+        {(clip.freeze_tail_sec ?? 0) === 0 ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={() => patchClip(clip.id, { freeze_tail_sec: 2 })}
+            title="Ajoute un segment d'image figée de 2s à droite du clip — ajustable au pixel près avec la souris dans la timeline."
+          >
+            + Ajouter un freeze (image figée) de 2s
+          </Button>
+        ) : (
+          <div className="space-y-1.5">
+            <NumberField
+              label="Image figée (sec)"
+              value={clip.freeze_tail_sec ?? 0}
+              step={0.1}
+              onChange={(v) =>
+                patchClip(clip.id, { freeze_tail_sec: Math.max(0, v) })
+              }
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full text-[11px] text-muted-foreground"
+              onClick={() => patchClip(clip.id, { freeze_tail_sec: 0 })}
+            >
+              Retirer le freeze
+            </Button>
+          </div>
+        )}
         <p className="text-[10px] leading-snug text-muted-foreground">
-          Le clip joue normalement puis fige sa dernière image pendant X
-          sec. Pour figer au milieu d&apos;un clip : place le playhead,
+          Le freeze apparaît comme un segment ❄ à droite du clip dans
+          la timeline — drag son bord droit pour ajuster la durée.
+          Pour figer au milieu d&apos;un clip : place le playhead,
           appuie sur <kbd className="rounded bg-muted px-1">S</kbd> pour
           couper, puis ajoute un freeze à la première moitié.
         </p>

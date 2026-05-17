@@ -33,15 +33,19 @@ from app.render.emoji_pack import get_apple_emoji_png
 
 log = logging.getLogger(__name__)
 
-# Match a single grapheme that includes an Extended_Pictographic codepoint —
-# i.e. an emoji and all its modifiers (skin tones, ZWJ joins, keycaps, flags).
-# Same regex semantics as the frontend `Intl.Segmenter` + `\p{Extended_Pictographic}`.
+# Match a single grapheme that includes an Extended_Pictographic codepoint
+# OR a Regional Indicator Symbol (= flag composant, ex: 🇫🇷 = U+1F1EB +
+# U+1F1F7). Extended_Pictographic seul ne couvre PAS les RIS, donc les
+# drapeaux passaient à travers. Même fix que côté frontend apple-emoji.ts.
+# `\X` (grapheme cluster) regroupe correctement la paire RIS d'un drapeau.
 _EMOJI_GRAPHEME_RE = regex.compile(r"\X")
-_HAS_PICTOGRAPHIC_RE = regex.compile(r"\p{Extended_Pictographic}")
+_HAS_EMOJI_CODEPOINT_RE = regex.compile(
+    r"[\p{Extended_Pictographic}\p{Regional_Indicator}]"
+)
 
 
 def text_contains_emoji(text: str) -> bool:
-    return bool(_HAS_PICTOGRAPHIC_RE.search(text or ""))
+    return bool(_HAS_EMOJI_CODEPOINT_RE.search(text or ""))
 
 
 # ---- segmentation ---------------------------------------------------
@@ -55,7 +59,7 @@ def _segments(text: str) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     buf: list[str] = []
     for grapheme in _EMOJI_GRAPHEME_RE.findall(text or ""):
-        if _HAS_PICTOGRAPHIC_RE.search(grapheme):
+        if _HAS_EMOJI_CODEPOINT_RE.search(grapheme):
             if buf:
                 out.append(("text", "".join(buf)))
                 buf = []

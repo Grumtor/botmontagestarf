@@ -47,7 +47,13 @@ export function getAppleEmojiUrl(native: string): string | null {
   return `${APPLE_EMOJI_BASE}/${cps.join("-")}.png`;
 }
 
-const EMOJI_RE = /\p{Extended_Pictographic}/u;
+// Extended_Pictographic couvre la plupart des emojis, mais PAS les
+// Regional Indicator Symbols qui composent les drapeaux (🇫🇷 = U+1F1EB
+// + U+1F1F7). Intl.Segmenter regroupe la paire RIS comme un seul
+// grapheme, donc tester la classe Regional_Indicator suffit pour les
+// flags. On garde aussi U+20E3 (Combining Enclosing Keycap) pour les
+// keycaps style 1️⃣.
+const EMOJI_RE = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u{20E3}]/u;
 
 export type TextSegment =
   | { kind: "text"; value: string }

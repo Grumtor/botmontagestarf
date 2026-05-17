@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Fonts, Templates } from "@/lib/api";
 import { useEditorStore } from "@/store/editor";
 import { clipDuration, timelineDuration, totalDuration } from "@/lib/editor-types";
+import { toast } from "@/hooks/use-toast";
 import { EditorTopbar } from "@/components/editor/editor-topbar";
 import { EditorSidebar } from "@/components/editor/editor-sidebar";
 import { EditorCanvas } from "@/components/editor/editor-canvas";
@@ -71,14 +72,21 @@ export function EditorView({ id }: { id: number }) {
         e.preventDefault();
         const state = useEditorStore.getState();
         const t = state.currentTime;
+        const EPS = 0.05;
 
         // Try the main track first: find the clip whose absolute time
         // range contains the playhead and split it there.
         let cursor = 0;
         for (const c of state.clips) {
           const dur = clipDuration(c);
-          if (t > cursor + 0.05 && t < cursor + dur - 0.05) {
-            state.splitMainClip(c.id, t);
+          if (t >= cursor + EPS && t <= cursor + dur - EPS) {
+            const ok = state.splitMainClip(c.id, t);
+            if (!ok) {
+              toast({
+                title: "Coupe impossible",
+                description: "Le playhead est trop près d'un bord du clip.",
+              });
+            }
             return;
           }
           cursor += dur;
@@ -94,12 +102,20 @@ export function EditorView({ id }: { id: number }) {
                   ? Math.max(0, c.trim_out - c.trim_in) + freezeTail
                   : Math.max(0, (c.source_duration_sec ?? 0) - c.trim_in) + freezeTail
                 : Math.max(0, c.duration_sec) + freezeTail;
-            if (t > c.start_time + 0.05 && t < c.start_time + dur - 0.05) {
+            if (t >= c.start_time + EPS && t <= c.start_time + dur - EPS) {
               state.splitExtraClip(track.id, c.id, t);
               return;
             }
           }
         }
+
+        // Nothing matched → visible feedback so the user understands
+        // why the shortcut "didn't work".
+        toast({
+          title: "Aucun clip à couper",
+          description:
+            "Place le playhead à l'intérieur d'un clip (main ou extra), puis appuie sur S.",
+        });
       }
     }
     window.addEventListener("keydown", onKey);

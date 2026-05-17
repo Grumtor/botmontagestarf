@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import {
   Film,
   Headphones,
   ImageIcon,
+  Snowflake,
   Square,
   Trash2,
 } from "lucide-react";
@@ -145,6 +146,32 @@ export function ExtraTrackLane({
           duration_sec: Math.max(0.1, initEnd - newStart),
         });
       }
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  /** Drag the RIGHT edge of the freeze segment — adjusts freeze_tail_sec
+   *  with snap. Symmetric to the main-track ClipTrack version. */
+  function startFreezeTrim(e: React.MouseEvent, clip: ExtraClip) {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedExtraClip(track.id, clip.id);
+    const startX = e.clientX;
+    const initFreeze = Math.max(0, clip.freeze_tail_sec ?? 0);
+    const natural = clipDuration(clip) - initFreeze;
+    const absStart = clip.start_time;
+
+    function onMove(ev: MouseEvent) {
+      const dt = (ev.clientX - startX) / pxPerSec;
+      const proposedFreeze = Math.max(0, initFreeze + dt);
+      const snappedEnd = snapTime(absStart + natural + proposedFreeze);
+      const newFreeze = Math.max(0, snappedEnd - absStart - natural);
+      patchExtraClip(track.id, clip.id, { freeze_tail_sec: newFreeze });
     }
     function onUp() {
       window.removeEventListener("mousemove", onMove);
@@ -323,12 +350,15 @@ export function ExtraTrackLane({
 
       {/* Clips */}
       {track.clips.map((c) => {
-        const dur = clipDuration(c);
+        const totalDur = clipDuration(c);
+        const freezeTail = Math.max(0, c.freeze_tail_sec ?? 0);
+        const naturalDur = Math.max(0, totalDur - freezeTail);
         const isSelected =
           selectedClipId === c.id && selectedExtraTrackId === track.id;
         const isAudioOnly = c.video_enabled === false;
         const left = c.start_time * pxPerSec;
-        const w = Math.max(2, dur * pxPerSec);
+        const w = Math.max(2, naturalDur * pxPerSec);
+        const wFreeze = freezeTail * pxPerSec;
         // Phase 26c — palette identique à la main track pour cohérence.
         // Phase 28 — quand video_enabled=false (audio only), on diagonale
         // le fond pour signaler visuellement.
@@ -351,70 +381,105 @@ export function ExtraTrackLane({
                 ? `/api/files/template_clip_thumb/${templateId}/${c.file_id}`
                 : null;
         return (
-          <div
-            key={c.id}
-            onMouseDown={(e) => startMove(e, c)}
-            onClick={(e) => {
-              e.stopPropagation();
-              setSelectedExtraClip(track.id, c.id);
-            }}
-            className={cn(
-              "absolute top-1.5 flex cursor-grab items-center overflow-hidden rounded text-[10px] text-white shadow transition",
-              palette,
-              isSelected && "ring-2 ring-foreground",
-            )}
-            style={{
-              left,
-              width: w,
-              height: height - 8,
-              backgroundImage: thumbUrl ? `url(${thumbUrl})` : undefined,
-              backgroundSize:
-                c.type === "fixed"
-                  ? "100% 100%"
-                  : c.type === "image"
-                    ? "cover"
-                    : undefined,
-              backgroundRepeat: "no-repeat",
-              backgroundPosition: "center",
-            }}
-            title={`${c.type} · start ${c.start_time.toFixed(2)}s · dur ${dur.toFixed(2)}s`}
-          >
-            {/* Subtle dark overlay so the badge text stays readable */}
-            {thumbUrl && (
-              <div className="pointer-events-none absolute inset-0 bg-black/20" />
-            )}
-            {/* Trim handles (left + right edges) */}
+          <Fragment key={c.id}>
             <div
-              onMouseDown={(e) => startTrimLeft(e, c)}
-              className="absolute left-0 top-0 z-10 h-full w-1.5 cursor-ew-resize bg-white/20 hover:bg-white/50"
-              title="Glisse pour rogner le début"
-            />
-            <div
-              onMouseDown={(e) => startTrimRight(e, c)}
-              className="absolute right-0 top-0 z-10 h-full w-1.5 cursor-ew-resize bg-white/20 hover:bg-white/50"
-              title="Glisse pour rogner la fin"
-            />
-            <div className="flex items-center gap-1 px-2 py-0.5">
-              {isAudioOnly ? (
-                <Headphones className="h-3 w-3" />
-              ) : c.type === "fixed" ? (
-                <Film className="h-3 w-3" />
-              ) : c.type === "image" ? (
-                <ImageIcon className="h-3 w-3" />
-              ) : (
-                <Square className="h-3 w-3" />
+              onMouseDown={(e) => startMove(e, c)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedExtraClip(track.id, c.id);
+              }}
+              className={cn(
+                "absolute top-1.5 flex cursor-grab items-center overflow-hidden rounded text-[10px] text-white shadow transition",
+                palette,
+                isSelected && "ring-2 ring-foreground",
               )}
-              <span className="truncate font-medium">
-                {isAudioOnly
-                  ? "Audio only"
-                  : c.type === "fixed"
-                    ? "Vidéo"
+              style={{
+                left,
+                width: w,
+                height: height - 8,
+                backgroundImage: thumbUrl ? `url(${thumbUrl})` : undefined,
+                backgroundSize:
+                  c.type === "fixed"
+                    ? "100% 100%"
                     : c.type === "image"
-                      ? "Image"
-                      : "Placeholder"}
-              </span>
+                      ? "cover"
+                      : undefined,
+                backgroundRepeat: "no-repeat",
+                backgroundPosition: "center",
+              }}
+              title={`${c.type} · start ${c.start_time.toFixed(2)}s · dur ${naturalDur.toFixed(2)}s`}
+            >
+              {thumbUrl && (
+                <div className="pointer-events-none absolute inset-0 bg-black/20" />
+              )}
+              <div
+                onMouseDown={(e) => startTrimLeft(e, c)}
+                className="absolute left-0 top-0 z-10 h-full w-1.5 cursor-ew-resize bg-white/20 hover:bg-white/50"
+                title="Glisse pour rogner le début"
+              />
+              <div
+                onMouseDown={(e) => startTrimRight(e, c)}
+                className="absolute right-0 top-0 z-10 h-full w-1.5 cursor-ew-resize bg-white/20 hover:bg-white/50"
+                title="Glisse pour rogner la fin"
+              />
+              <div className="flex items-center gap-1 px-2 py-0.5">
+                {isAudioOnly ? (
+                  <Headphones className="h-3 w-3" />
+                ) : c.type === "fixed" ? (
+                  <Film className="h-3 w-3" />
+                ) : c.type === "image" ? (
+                  <ImageIcon className="h-3 w-3" />
+                ) : (
+                  <Square className="h-3 w-3" />
+                )}
+                <span className="truncate font-medium">
+                  {isAudioOnly
+                    ? "Audio only"
+                    : c.type === "fixed"
+                      ? "Vidéo"
+                      : c.type === "image"
+                        ? "Image"
+                        : "Placeholder"}
+                </span>
+              </div>
             </div>
-          </div>
+
+            {/* Freeze tail segment — same UX as the main track. */}
+            {freezeTail > 0 && wFreeze > 0 && (
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedExtraClip(track.id, c.id);
+                }}
+                className={cn(
+                  "absolute top-1.5 overflow-hidden rounded border border-cyan-300/70 bg-cyan-900/40 transition",
+                  isSelected && "ring-1 ring-foreground/70",
+                )}
+                style={{
+                  left: left + w,
+                  width: Math.max(wFreeze, 6),
+                  height: height - 8,
+                  backgroundImage: thumbUrl ? `url(${thumbUrl})` : undefined,
+                  backgroundSize: "auto 100%",
+                  backgroundRepeat: "no-repeat",
+                  backgroundPosition: "right center",
+                }}
+                title={`Image figée · ${freezeTail.toFixed(1)}s`}
+              >
+                <div className="absolute inset-0 bg-cyan-950/60" />
+                <div
+                  onMouseDown={(e) => startFreezeTrim(e, c)}
+                  className="absolute right-0 top-0 z-10 h-full w-1.5 cursor-ew-resize bg-cyan-200/50 hover:bg-cyan-100/80"
+                />
+                <div className="absolute left-1 top-1 z-[1] flex items-center gap-1 rounded bg-cyan-950/80 px-1 py-0.5 text-[9px] text-cyan-100">
+                  <Snowflake className="h-3 w-3" />
+                  {wFreeze > 50 && (
+                    <span className="truncate">{freezeTail.toFixed(1)}s</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </Fragment>
         );
       })}
 
