@@ -439,6 +439,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       source_width: width,
       source_height: height,
       filter: "none",
+      filter_start_sec: null,
+      filter_end_sec: null,
       freeze_tail_sec: 0,
     };
     // Persist a clip-level "duration" via trim_out so the pipeline knows
@@ -487,6 +489,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       source_width: width,
       source_height: height,
       filter: "none",
+      filter_start_sec: null,
+      filter_end_sec: null,
       freeze_tail_sec: 0,
     };
     let added = false;
@@ -526,6 +530,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       audio_volume: 1.0,
       video_enabled: true,
       filter: "none",
+      filter_start_sec: null,
+      filter_end_sec: null,
       freeze_tail_sec: 0,
     };
     let added = false;

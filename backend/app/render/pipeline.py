@@ -64,6 +64,12 @@ class ClipInput:
     is_image: bool = False
     # Per-clip color filter: "none" (default) or "bw" (grayscale).
     color_filter: str = "none"
+    # Optional sub-range (local clip seconds) where the color filter applies.
+    # None = filter on the whole clip ; both set = filter only between
+    # [filter_start_sec, filter_end_sec]. Outside the range the source
+    # colors are preserved.
+    filter_start_sec: Optional[float] = None
+    filter_end_sec: Optional[float] = None
     # Extra seconds appended at the end where the last visible frame is
     # held (video) and silence is mixed (audio). Lets the user "freeze"
     # the closing moment without re-trimming or duplicating the clip.
@@ -98,6 +104,8 @@ class ExtraClipInput:
     is_image: bool = False
     video_enabled: bool = True
     color_filter: str = "none"
+    filter_start_sec: Optional[float] = None
+    filter_end_sec: Optional[float] = None
     freeze_tail_sec: float = 0.0
 
 
@@ -305,8 +313,23 @@ def build_render_command(
                 f"tpad=stop_mode=clone:stop_duration={freeze_tail:.3f},"
             )
         if clip.color_filter == "bw":
-            # format=gray drops chroma, then back to yuv420p for the encoder.
-            v_chain += "format=gray,format=yuv420p,"
+            fs = clip.filter_start_sec
+            fe = clip.filter_end_sec
+            has_range = (
+                fs is not None and fe is not None and fe > fs >= 0
+            )
+            if has_range:
+                # Sub-range B&W : desaturate only between [fs, fe] using
+                # hue=s=0 with the temporal enable option. Outside the
+                # range, original colors are kept. Commas inside enable
+                # must be escaped (filter-chain separator).
+                v_chain += (
+                    f"hue=s=0:enable='between(t\\,{fs:.3f}\\,{fe:.3f})',"
+                )
+            else:
+                # Full-clip B&W : format=gray drops chroma entirely
+                # (cheapest path) then back to yuv420p for the encoder.
+                v_chain += "format=gray,format=yuv420p,"
         v_chain += f"fps={fps}"
         v_chain += f"[{v_label}]"
         chains.append(v_chain)
@@ -452,7 +475,14 @@ def build_render_command(
                 f"trim=duration={total_ex:.3f},setpts=PTS-STARTPTS,"
             )
             if ex.color_filter == "bw":
-                v_chain += "format=gray,format=yuv420p,"
+                fs = ex.filter_start_sec
+                fe = ex.filter_end_sec
+                if fs is not None and fe is not None and fe > fs >= 0:
+                    v_chain += (
+                        f"hue=s=0:enable='between(t\\,{fs:.3f}\\,{fe:.3f})',"
+                    )
+                else:
+                    v_chain += "format=gray,format=yuv420p,"
             v_chain += f"fps={fps},"
             # Delay to absolute timeline position via setpts.
             v_chain += f"setpts=PTS+{ex.start_time:.3f}/TB[{scaled_label}]"

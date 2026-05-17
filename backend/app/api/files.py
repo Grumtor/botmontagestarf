@@ -163,4 +163,10 @@ def serve_render_item(
     p = Path(files[index])
     if not p.is_file():
         raise HTTPException(404, "Output file missing")
-    return FileResponse(p, media_type="video/mp4", filename=p.name)
+    # If iPhone naming was selected at render time, surface the matching
+    # IMG_*.MOV filename in the Content-Disposition so the per-file
+    # download has the same name as the ZIP entries.
+    mp = rec.metadata_profile or {}
+    apple_map = mp.get("apple_name_by_path") or {}
+    download_name = apple_map.get(str(p)) or apple_map.get(p.name) or p.name
+    return FileResponse(p, media_type="video/mp4", filename=download_name)

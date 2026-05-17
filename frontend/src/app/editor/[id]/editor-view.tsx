@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Fonts, Templates } from "@/lib/api";
 import { useEditorStore } from "@/store/editor";
-import { clipDuration, totalDuration } from "@/lib/editor-types";
+import { clipDuration, timelineDuration, totalDuration } from "@/lib/editor-types";
 import { EditorTopbar } from "@/components/editor/editor-topbar";
 import { EditorSidebar } from "@/components/editor/editor-sidebar";
 import { EditorCanvas } from "@/components/editor/editor-canvas";
@@ -51,7 +51,17 @@ export function EditorView({ id }: { id: number }) {
         const state = useEditorStore.getState();
         const step = e.shiftKey ? 1 : FRAME_SEC;
         const dir = e.key === "ArrowLeft" ? -1 : 1;
-        const max = totalDuration(state.clips);
+        // Bornes = la fin la plus tardive parmi main + extras + layers,
+        // pour qu'on puisse scrub partout même sans clip main. Au moins
+        // 1s pour que les flèches bougent même sur une timeline vide.
+        const max = Math.max(
+          1,
+          timelineDuration({
+            clips: state.clips,
+            extraTracks: state.extraTracks,
+            layers: state.layers,
+          }),
+        );
         const next = Math.max(0, Math.min(max, state.currentTime + dir * step));
         state.setCurrentTime(next);
         return;

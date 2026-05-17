@@ -183,10 +183,18 @@ export function EditorCanvas() {
   const activeClip = active ? clips[active.clipIndex] : null;
   const activeIsFixed = activeClip?.type === "fixed";
   const activeIsImage = activeClip?.type === "image";
-  const activeFilterStyle =
-    activeClip && (activeClip.filter ?? "none") === "bw"
-      ? { filter: "grayscale(1)" }
-      : undefined;
+  // B&W filter style — respects the optional sub-range. localTime is
+  // the time within the active clip (after trim_in offset), matching
+  // what the ffmpeg pipeline uses as `t`.
+  const activeFilterStyle = (() => {
+    if (!activeClip || (activeClip.filter ?? "none") !== "bw") return undefined;
+    const fs = activeClip.filter_start_sec;
+    const fe = activeClip.filter_end_sec;
+    const hasRange = fs != null && fe != null && fe > fs && fs >= 0;
+    if (!hasRange) return { filter: "grayscale(1)" };
+    const local = active?.localTime ?? 0;
+    return local >= fs && local <= fe ? { filter: "grayscale(1)" } : undefined;
+  })();
 
   const activeFileUrl =
     template && activeClip && (activeClip.type === "fixed" || activeClip.type === "image")
@@ -796,8 +804,16 @@ function ExtraClipCanvas({
   localTime: number;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const filterStyle =
-    (clip.filter ?? "none") === "bw" ? { filter: "grayscale(1)" } : undefined;
+  const filterStyle = (() => {
+    if ((clip.filter ?? "none") !== "bw") return undefined;
+    const fs = clip.filter_start_sec;
+    const fe = clip.filter_end_sec;
+    const hasRange = fs != null && fe != null && fe > fs && fs >= 0;
+    if (!hasRange) return { filter: "grayscale(1)" };
+    return localTime >= fs && localTime <= fe
+      ? { filter: "grayscale(1)" }
+      : undefined;
+  })();
 
   // Seek the underlying <video> to the right source frame, capped to the
   // natural source end so freeze_tail_sec appears as a held last frame.

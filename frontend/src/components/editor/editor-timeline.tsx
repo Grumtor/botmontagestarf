@@ -1,7 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Film,
+  Image as ImageIcon,
+  Layers,
+  Music2,
+  Smile,
+  Sticker,
+  Type,
+} from "lucide-react";
 
 import { useEditorStore } from "@/store/editor";
 import {
@@ -137,46 +147,63 @@ export function EditorTimeline() {
     <div className="flex h-full min-h-0 flex-col bg-card">
       <TimelineActionBar />
       <div className="flex flex-1 min-h-0">
-        {/* Track labels (sticky left) */}
+        {/* Track labels (sticky left) — chaque piste a son icône + un
+            liseré couleur cohérent avec la track elle-même. */}
         <div
-          className="flex shrink-0 flex-col border-r border-border bg-background text-xs"
+          className="flex shrink-0 flex-col border-r border-border bg-background/60 text-xs"
           style={{ width: LABEL_WIDTH }}
         >
           <div
-            className="flex items-center justify-between border-b border-border px-2 text-[10px] uppercase tracking-wider text-muted-foreground"
+            className="flex items-center justify-between border-b border-border bg-background px-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
             style={{ height: RULER_HEIGHT }}
           >
             <span>Pistes</span>
-            <span className="font-mono">{Math.round(pxPerSec)} px/s</span>
+            <span className="font-mono normal-case tracking-normal text-[9px] text-muted-foreground/70">
+              {Math.round(pxPerSec)} px/s
+            </span>
           </div>
-          <TrackLabel label="Vidéo" height={CLIP_TRACK_HEIGHT + TRACK_GAP} />
+          <TrackLabel
+            icon={Film}
+            label="Vidéo"
+            accent="rgba(139, 92, 246, 0.9)"
+            height={CLIP_TRACK_HEIGHT + TRACK_GAP}
+          />
           {extraTracks.map((t, i) => (
             <TrackLabel
               key={t.id}
-              label={`${t.name || `Track ${i + 2}`}`}
-              color="rgba(99, 102, 241, 0.9)"
+              icon={Layers}
+              label={t.name || `Track ${i + 2}`}
+              accent="rgba(99, 102, 241, 0.9)"
               height={EXTRA_TRACK_HEIGHT + TRACK_GAP}
             />
           ))}
           <button
             type="button"
             onClick={() => setAudioOpen((v) => !v)}
-            className="flex items-center gap-1 truncate border-b border-border px-2 text-left transition hover:bg-accent/30"
+            className="group flex items-center gap-2 truncate border-b border-border bg-background/40 px-2.5 text-left transition hover:bg-accent/40"
             style={{ height: (audioOpen ? AUDIO_TRACK_HEIGHT : 24) + TRACK_GAP }}
             title={audioOpen ? "Replier la piste audio" : "Déplier la piste audio"}
           >
+            <span
+              className="h-3.5 w-1 shrink-0 rounded-full"
+              style={{ backgroundColor: "rgba(244, 114, 182, 0.9)" }}
+            />
             {audioOpen ? (
-              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+              <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
             ) : (
-              <ChevronRight className="h-3 w-3 text-muted-foreground" />
+              <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
             )}
-            <span className="truncate text-muted-foreground">Audio</span>
+            <Music2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-foreground" />
+            <span className="truncate text-foreground/80 group-hover:text-foreground">
+              Audio
+            </span>
           </button>
           {layerTracks.map((l) => (
             <TrackLabel
               key={l.id}
+              icon={LAYER_ICONS[l.type]}
               label={`${LAYER_LABELS[l.type]} #${l.z_index + 1}`}
-              color={LAYER_COLORS[l.type]}
+              accent={LAYER_COLORS[l.type]}
               height={LAYER_TRACK_HEIGHT + TRACK_GAP}
             />
           ))}
@@ -284,28 +311,36 @@ export function EditorTimeline() {
   );
 }
 
+const LAYER_ICONS: Record<keyof typeof LAYER_LABELS, typeof Type> = {
+  text: Type,
+  image: ImageIcon,
+  gif: Sticker,
+  emoji: Smile,
+};
+
 function TrackLabel({
+  icon: Icon,
   label,
-  color,
+  accent,
   height,
 }: {
+  icon?: typeof Type;
   label: string;
-  color?: string;
+  accent?: string;
   height: number;
 }) {
   return (
     <div
-      className="flex items-center gap-2 truncate border-b border-border px-2 text-muted-foreground"
+      className="flex items-center gap-2 truncate border-b border-border bg-background/40 px-2.5 text-foreground/80"
       style={{ height }}
       title={label}
     >
-      {color && (
-        <span
-          className="h-2.5 w-2.5 shrink-0 rounded-sm"
-          style={{ backgroundColor: color }}
-        />
-      )}
-      <span className="truncate">{label}</span>
+      <span
+        className="h-3.5 w-1 shrink-0 rounded-full"
+        style={{ backgroundColor: accent ?? "rgba(148, 163, 184, 0.6)" }}
+      />
+      {Icon && <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+      <span className="truncate text-[11px]">{label}</span>
     </div>
   );
 }

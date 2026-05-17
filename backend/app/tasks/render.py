@@ -133,27 +133,38 @@ def process_render_job(job_id: int) -> None:
         zip_path = RENDERS_DIR / f"{job.id}.zip"
         # Sort by gen_idx so output is grouped consistently in the ZIP.
         sorted_entries = sorted(output_entries, key=lambda e: (e[1], e[0]))
+
+        # Pre-compute the apple-style filename per output path so the
+        # individual download endpoint (/api/files/render_item/...) can
+        # return the same names as the ZIP. Without this, the ZIP shows
+        # IMG_*.MOV but per-file downloads show template_*.mp4 — looks
+        # like the option is broken to the user.
+        apple_name_by_path: dict[str, str] = {}
+        if naming == "iphone":
+            counter = random.randint(1500, 9000)
+            for f, _gen_idx in sorted_entries:
+                apple_name_by_path[f] = f"IMG_{counter:04d}.MOV"
+                counter += 1
+
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
-            if naming == "iphone":
-                counter = random.randint(1500, 9000)
-                for f, gen_idx in sorted_entries:
-                    base_arc = f"IMG_{counter:04d}.MOV"
-                    counter += 1
-                    arcname = (
-                        f"{pass_label} {gen_idx}/{base_arc}"
-                        if multi_gen
-                        else base_arc
-                    )
-                    zf.write(f, arcname=arcname)
-            else:
-                for f, gen_idx in sorted_entries:
-                    base_arc = Path(f).name
-                    arcname = (
-                        f"{pass_label} {gen_idx}/{base_arc}"
-                        if multi_gen
-                        else base_arc
-                    )
-                    zf.write(f, arcname=arcname)
+            for f, gen_idx in sorted_entries:
+                base_arc = (
+                    apple_name_by_path[f] if naming == "iphone" else Path(f).name
+                )
+                arcname = (
+                    f"{pass_label} {gen_idx}/{base_arc}"
+                    if multi_gen
+                    else base_arc
+                )
+                zf.write(f, arcname=arcname)
+
+        # Persist the apple-name mapping into the job's metadata_profile
+        # so the file-serve endpoint can read it back. Stored as a dict
+        # keyed by absolute path to avoid index drift.
+        if apple_name_by_path:
+            mp = dict(job.metadata_profile or {})
+            mp["apple_name_by_path"] = apple_name_by_path
+            job.metadata_profile = mp
 
         job.output_zip_path = str(zip_path)
         job.status = JobStatus.done

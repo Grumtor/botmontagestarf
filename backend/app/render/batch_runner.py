@@ -225,6 +225,10 @@ def gather_render_inputs(
         audio_volume = float(clip.get("audio_volume", 1.0))
         color_filter = str(clip.get("filter", "none") or "none")
         freeze_tail = max(0.0, float(clip.get("freeze_tail_sec", 0) or 0))
+        raw_fs = clip.get("filter_start_sec")
+        raw_fe = clip.get("filter_end_sec")
+        filter_start = float(raw_fs) if raw_fs is not None else None
+        filter_end = float(raw_fe) if raw_fe is not None else None
 
         if ctype == "fixed":
             file_id = clip.get("file_id")
@@ -247,6 +251,8 @@ def gather_render_inputs(
                     audio_enabled=audio_enabled,
                     audio_volume=audio_volume,
                     color_filter=color_filter,
+                    filter_start_sec=filter_start,
+                    filter_end_sec=filter_end,
                     freeze_tail_sec=freeze_tail,
                 )
             )
@@ -270,6 +276,8 @@ def gather_render_inputs(
                     target_duration=target_dur,
                     is_image=True,
                     color_filter=color_filter,
+                    filter_start_sec=filter_start,
+                    filter_end_sec=filter_end,
                     freeze_tail_sec=freeze_tail,
                 )
             )
@@ -303,6 +311,8 @@ def gather_render_inputs(
                     audio_volume=audio_volume,
                     target_duration=target_dur,
                     color_filter=color_filter,
+                    filter_start_sec=filter_start,
+                    filter_end_sec=filter_end,
                     freeze_tail_sec=freeze_tail,
                 )
             )
@@ -468,6 +478,10 @@ def gather_render_inputs(
             start_time = float(clip.get("start_time", 0))
             color_filter_x = str(clip.get("filter", "none") or "none")
             freeze_tail_x = max(0.0, float(clip.get("freeze_tail_sec", 0) or 0))
+            raw_fs_x = clip.get("filter_start_sec")
+            raw_fe_x = clip.get("filter_end_sec")
+            filter_start_x = float(raw_fs_x) if raw_fs_x is not None else None
+            filter_end_x = float(raw_fe_x) if raw_fe_x is not None else None
             # duration_sec: explicit field wins. For fixed extra clips
             # the frontend stores the timeline duration implicitly via
             # trim_out (see editor.ts addExtraFixedClip), so fall back
@@ -516,6 +530,8 @@ def gather_render_inputs(
                         is_image=is_image,
                         video_enabled=video_enabled_x,
                         color_filter=color_filter_x,
+                        filter_start_sec=filter_start_x,
+                        filter_end_sec=filter_end_x,
                         freeze_tail_sec=freeze_tail_x,
                     )
                 )
@@ -552,6 +568,8 @@ def gather_render_inputs(
                         audio_volume=audio_volume_x,
                         video_enabled=video_enabled_x,
                         color_filter=color_filter_x,
+                        filter_start_sec=filter_start_x,
+                        filter_end_sec=filter_end_x,
                         freeze_tail_sec=freeze_tail_x,
                     )
                 )

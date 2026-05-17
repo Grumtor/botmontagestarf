@@ -278,11 +278,16 @@ export function ClipInspector({ clip, extraTrackId }: Props) {
       <Section title="Effets">
         <button
           type="button"
-          onClick={() =>
+          onClick={() => {
+            const next = (clip.filter ?? "none") === "bw" ? "none" : "bw";
             patchClip(clip.id, {
-              filter: (clip.filter ?? "none") === "bw" ? "none" : "bw",
-            })
-          }
+              filter: next,
+              // Reset range when turning off so old values don't linger.
+              ...(next === "none"
+                ? { filter_start_sec: null, filter_end_sec: null }
+                : {}),
+            });
+          }}
           className={cn(
             "flex w-full items-center justify-between rounded-md border px-3 py-2 text-xs transition",
             (clip.filter ?? "none") === "bw"
@@ -296,6 +301,41 @@ export function ClipInspector({ clip, extraTrackId }: Props) {
             {(clip.filter ?? "none") === "bw" ? "ON" : "OFF"}
           </span>
         </button>
+
+        {(clip.filter ?? "none") === "bw" && (
+          <div className="space-y-1.5 rounded-md border border-border/70 bg-background/40 p-2">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Plage N&amp;B (optionnel)
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <NumberField
+                label="Début (sec)"
+                value={clip.filter_start_sec ?? 0}
+                step={0.1}
+                onChange={(v) =>
+                  patchClip(clip.id, {
+                    filter_start_sec: v <= 0 ? null : v,
+                  })
+                }
+              />
+              <NumberField
+                label="Fin (sec)"
+                value={clip.filter_end_sec ?? clipDur}
+                step={0.1}
+                onChange={(v) =>
+                  patchClip(clip.id, {
+                    filter_end_sec: v >= clipDur || v <= 0 ? null : v,
+                  })
+                }
+              />
+            </div>
+            <p className="text-[10px] leading-snug text-muted-foreground">
+              Laisse vide pour appliquer le N&amp;B sur tout le clip. Sinon
+              le filtre est actif uniquement entre ces 2 instants (en
+              secondes depuis le début du clip).
+            </p>
+          </div>
+        )}
 
         <NumberField
           label="Geler la dernière image (sec)"

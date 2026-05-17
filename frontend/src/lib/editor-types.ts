@@ -193,6 +193,8 @@ export function makeFixedClip(
     audio_enabled: true,
     audio_volume: 1.0,
     filter: "none",
+    filter_start_sec: null,
+    filter_end_sec: null,
     freeze_tail_sec: 0,
   };
 }
@@ -207,6 +209,8 @@ export function makePlaceholderClip(durationSec: number = 3.0): PlaceholderClip 
     audio_enabled: true,
     audio_volume: 1.0,
     filter: "none",
+    filter_start_sec: null,
+    filter_end_sec: null,
     freeze_tail_sec: 0,
   };
 }
@@ -229,6 +233,8 @@ export function makeImageClip(
     audio_enabled: false,
     audio_volume: 0,
     filter: "none",
+    filter_start_sec: null,
+    filter_end_sec: null,
     freeze_tail_sec: 0,
   };
 }

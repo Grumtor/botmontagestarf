@@ -221,6 +221,11 @@ export const ClipBaseSchema = z.object({
   trim_out: z.number().nullable().default(null),
   /** Per-clip color filter. "none" = source colors, "bw" = grayscale. */
   filter: ClipFilterSchema.default("none"),
+  /** Optional time range (in local clip seconds, from 0) during which the
+   *  filter applies. Both null = filter on the whole clip. Either set =
+   *  filter only between [filter_start_sec, filter_end_sec]. */
+  filter_start_sec: z.number().nullable().default(null),
+  filter_end_sec: z.number().nullable().default(null),
   /** Freeze the last visible frame for this many extra seconds after the
    *  clip's natural end. 0 = no freeze. Used to hold a moment as a still. */
   freeze_tail_sec: z.number().default(0),
