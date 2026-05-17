@@ -35,6 +35,7 @@ export function EditorTimeline() {
   const layers = useEditorStore((s) => s.layers);
   const clips = useEditorStore((s) => s.clips);
   const extraTracks = useEditorStore((s) => s.extraTracks);
+  const audioOverlay = useEditorStore((s) => s.audioOverlay);
   const currentTime = useEditorStore((s) => s.currentTime);
   const setCurrentTime = useEditorStore((s) => s.setCurrentTime);
   const selectedLayerId = useEditorStore((s) => s.selectedLayerId);
@@ -68,10 +69,10 @@ export function EditorTimeline() {
   const tracksWidth = Math.max(duration * pxPerSec, 200);
   const layerTracks = [...layers].reverse();
 
-  // Snap points = chaque bord de clip (main + extras) + 0 + total + playhead.
-  // Phase 28d — les bords des clips d'extra tracks sont aussi snappables
-  // depuis la main track et inversement, donc resize/move s'aligne
-  // proprement entre les pistes.
+  // Snap points = chaque bord de clip (main + extras) + bord de layer
+  // (text/image/gif/emoji) + audio overlay start + 0 + total + playhead.
+  // Tout est consommé par ClipTrack, ExtraTrackLane et LayerLane pour
+  // que resize/drag s'alignent magnétiquement entre toutes les pistes.
   const starts = clipStartTimes(clips);
   const snapPoints: number[] = [0, duration, currentTime];
   starts.forEach((s, i) => {
@@ -80,15 +81,23 @@ export function EditorTimeline() {
   });
   for (const t of extraTracks) {
     for (const c of t.clips) {
+      const freezeTail = Math.max(0, c.freeze_tail_sec ?? 0);
       const dur =
         c.type === "fixed"
           ? c.trim_out != null
-            ? Math.max(0, c.trim_out - c.trim_in)
-            : Math.max(0, (c.source_duration_sec ?? 0) - c.trim_in)
-          : Math.max(0, c.duration_sec);
+            ? Math.max(0, c.trim_out - c.trim_in) + freezeTail
+            : Math.max(0, (c.source_duration_sec ?? 0) - c.trim_in) + freezeTail
+          : Math.max(0, c.duration_sec) + freezeTail;
       snapPoints.push(c.start_time);
       snapPoints.push(c.start_time + dur);
     }
+  }
+  for (const l of layers) {
+    snapPoints.push(l.start_time);
+    snapPoints.push(l.end_time);
+  }
+  if (audioOverlay?.file_id) {
+    snapPoints.push(audioOverlay.start_offset);
   }
   const audioH = audioOpen ? AUDIO_TRACK_HEIGHT : 0;
   const totalTracksHeight =

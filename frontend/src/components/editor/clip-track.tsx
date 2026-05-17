@@ -85,8 +85,16 @@ export function ClipTrack({ pxPerSec, width, height, snapPoints }: Props) {
           const snappedEnd = snapAbsTime(clipAbsStart + newDurRaw);
           const newDur = Math.max(0.1, snappedEnd - clipAbsStart);
           patchClip(clip.id, { duration_sec: newDur });
+        } else {
+          // Left edge: shrink/grow duration symmetrically (main track is
+          // sequential so we can't actually move the clip's start). Snap
+          // the absolute end so the user feels alignment with other
+          // tracks' edges when dragging.
+          const newDurRaw = Math.max(0.1, clip.duration_sec - dt);
+          const snappedEnd = snapAbsTime(clipAbsStart + newDurRaw);
+          const newDur = Math.max(0.1, snappedEnd - clipAbsStart);
+          patchClip(clip.id, { duration_sec: newDur });
         }
-        // left edge: noop (no in-source time for placeholders/images).
         return;
       }
 
@@ -108,11 +116,26 @@ export function ClipTrack({ pxPerSec, width, height, snapPoints }: Props) {
         );
         patchClip(clip.id, { trim_out: newTrimOut });
       } else {
+        // Left edge of fixed clip = adjust trim_in. Snap the resulting
+        // clip duration (= trim_out - trim_in) against the timeline by
+        // snapping the absolute END (which is clipAbsStart + duration).
+        // Symmetric snap to the right edge means alignment works on
+        // both sides.
         const initIn = clip.trim_in;
         const maxIn = (clip.trim_out ?? clip.source_duration_sec ?? 0) - 0.1;
-        patchClip(clip.id, {
-          trim_in: Math.max(0, Math.min(maxIn, initIn + dt)),
-        });
+        const proposedTrimIn = Math.max(0, Math.min(maxIn, initIn + dt));
+        const proposedDur =
+          (clip.trim_out ?? clip.source_duration_sec ?? 0) - proposedTrimIn;
+        const snappedAbsEnd = snapAbsTime(clipAbsStart + proposedDur);
+        const snappedDur = Math.max(0.1, snappedAbsEnd - clipAbsStart);
+        const snappedTrimIn = Math.max(
+          0,
+          Math.min(
+            maxIn,
+            (clip.trim_out ?? clip.source_duration_sec ?? 0) - snappedDur,
+          ),
+        );
+        patchClip(clip.id, { trim_in: snappedTrimIn });
       }
     }
     function onUp() {
