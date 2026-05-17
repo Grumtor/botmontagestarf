@@ -942,10 +942,24 @@ def build_render_command(
             "-preset", preset,
             "-crf", str(crf),
             "-pix_fmt", "yuv420p",
+            # Match real iPhone captures — also the most widely supported
+            # H.264 config on mobile decoders.
+            "-profile:v", "high",
+            "-level", "4.0",
             "-r", str(fps),
             "-c:a", "aac",
             "-b:a", "192k",
             "-ac", "2",
+            # 48 kHz is what iPhone/iOS record at and what mobile MP4
+            # decoders expect. Without an explicit -ar, ffmpeg keeps the
+            # source rate which can be 44.1/22.05/anything → some mobile
+            # players silently drop the audio track.
+            "-ar", "48000",
+            # Move the moov atom to the start of the file so mobile
+            # players can begin decoding (incl. audio sample tables)
+            # without having to seek to the end. Mandatory for any video
+            # consumed via Photos / WhatsApp / Instagram on phone.
+            "-movflags", "+faststart",
             "-shortest",
             str(output_path),
         ]
