@@ -153,8 +153,11 @@ export const AdminUserSchema = z.object({
   max_templates: z.number().nullable(),
   render_credits: z.number(),
   is_active: z.boolean(),
-  template_count: z.number().default(0),
-  job_count: z.number().default(0),
+  // Counts are always sent by the backend via the `_summarize` helper —
+  // required, no default (sinon zod infère un type `number | undefined`
+  // qui casse les setState côté React).
+  template_count: z.number(),
+  job_count: z.number(),
 });
 export type AdminUser = z.infer<typeof AdminUserSchema>;
 
