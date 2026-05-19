@@ -143,6 +143,66 @@ export const Fonts = {
   list: () => request(z.array(FontMetaSchema), "/api/fonts"),
 };
 
+// ===== admin (Phase 33) =============================================
+
+export const AdminUserSchema = z.object({
+  id: z.number(),
+  username: z.string(),
+  role: z.enum(["admin", "user"]),
+  priority: z.enum(["high", "normal", "low"]),
+  max_templates: z.number().nullable(),
+  render_credits: z.number(),
+  is_active: z.boolean(),
+  template_count: z.number().default(0),
+  job_count: z.number().default(0),
+});
+export type AdminUser = z.infer<typeof AdminUserSchema>;
+
+export type AdminUserCreateInput = {
+  username: string;
+  password: string;
+  role?: "admin" | "user";
+  priority?: "high" | "normal" | "low";
+  max_templates?: number | null;
+  render_credits?: number;
+};
+
+export type AdminUserUpdateInput = {
+  username?: string;
+  role?: "admin" | "user";
+  priority?: "high" | "normal" | "low";
+  max_templates?: number | null;
+  render_credits?: number;
+  is_active?: boolean;
+};
+
+export const Admin = {
+  listUsers: () =>
+    request(z.array(AdminUserSchema), "/api/admin/users"),
+  createUser: (data: AdminUserCreateInput) =>
+    request(AdminUserSchema, "/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateUser: (id: number, data: AdminUserUpdateInput) =>
+    request(AdminUserSchema, `/api/admin/users/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  resetPassword: (id: number, password: string) =>
+    requestVoid(`/api/admin/users/${id}/password`, {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    }),
+  topUpCredits: (id: number, amount: number) =>
+    request(AdminUserSchema, `/api/admin/users/${id}/credits`, {
+      method: "POST",
+      body: JSON.stringify({ amount }),
+    }),
+  deleteUser: (id: number) =>
+    requestVoid(`/api/admin/users/${id}`, { method: "DELETE" }),
+};
+
 // ===== layers (overlays on top of the video) =========================
 
 export const LayerTypeSchema = z.enum(["text", "image", "gif", "emoji"]);

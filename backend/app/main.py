@@ -30,6 +30,7 @@ from app.api.jobs import router as jobs_router
 from app.api.photos import router as photos_router
 from app.api.render import router as render_router
 from app.api.sample_video import router as sample_video_router
+from app.api.admin import router as admin_router
 from app.api.templates import router as templates_router
 from app.auth import COOKIE_NAME, auth_enabled, verify_session_token
 from app.config import settings
@@ -287,6 +288,7 @@ app.include_router(render_router)
 app.include_router(jobs_router)
 app.include_router(photos_router)
 app.include_router(sample_video_router)
+app.include_router(admin_router)
 
 
 @app.get("/api/health")

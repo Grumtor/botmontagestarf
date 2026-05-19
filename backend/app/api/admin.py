@@ -1,0 +1,293 @@
+"""Admin-only endpoints for user management (Phase 33 — Phase 2 SaaS).
+
+All routes require the caller to be authenticated AND have role=admin.
+Anything that fails authz returns 403.
+
+Endpoints :
+  GET    /api/admin/users           → list all users
+  POST   /api/admin/users           → create a new user
+  GET    /api/admin/users/{id}      → get one user
+  PATCH  /api/admin/users/{id}      → update fields (role, priority,
+                                       max_templates, render_credits,
+                                       is_active, username)
+  POST   /api/admin/users/{id}/password → reset password
+  POST   /api/admin/users/{id}/credits  → top-up render_credits (additive)
+  DELETE /api/admin/users/{id}      → hard delete (cascades to templates/
+                                       render_jobs + wipes their files)
+"""
+from __future__ import annotations
+
+import logging
+import shutil
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.auth import hash_password
+from app.db import get_db
+from app.db.models import RenderJob, Template, User, UserPriority, UserRole
+from app.storage import RENDERS_DIR, template_dir
+from app.users import require_admin
+
+log = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+# ---- shared schemas --------------------------------------------------
+
+class UserSummary(BaseModel):
+    """Public-safe view of a user — no password hash."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    role: UserRole
+    priority: UserPriority
+    max_templates: Optional[int]
+    render_credits: int
+    is_active: bool
+    # extra computed counts for the admin table view
+    template_count: int = 0
+    job_count: int = 0
+
+
+class UserCreate(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=4, max_length=512)
+    role: UserRole = UserRole.user
+    priority: UserPriority = UserPriority.normal
+    # null = unlimited. Default 5 for new regular users.
+    max_templates: Optional[int] = Field(default=5, ge=0)
+    render_credits: int = Field(default=50, ge=0)
+
+
+class UserUpdate(BaseModel):
+    """All fields optional — only provided ones get patched. Password is
+    a separate endpoint (POST .../password) to avoid leaking it in
+    audit logs that might persist body payloads."""
+    username: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    role: Optional[UserRole] = None
+    priority: Optional[UserPriority] = None
+    max_templates: Optional[int] = Field(default=None, ge=0)
+    render_credits: Optional[int] = Field(default=None, ge=0)
+    is_active: Optional[bool] = None
+
+
+class PasswordReset(BaseModel):
+    password: str = Field(min_length=4, max_length=512)
+
+
+class CreditsTopUp(BaseModel):
+    amount: int = Field(gt=0, le=1_000_000)
+
+
+# ---- helpers ---------------------------------------------------------
+
+def _summarize(db: Session, u: User) -> UserSummary:
+    """Build a UserSummary with the computed counts. Single small query
+    per user — fine for the typical 10-50 users this app will have."""
+    from sqlalchemy import func as sa_func
+    t_count = db.scalar(
+        select(sa_func.count()).select_from(Template)
+        .where(Template.owner_id == u.id)
+    ) or 0
+    j_count = db.scalar(
+        select(sa_func.count()).select_from(RenderJob)
+        .where(RenderJob.owner_id == u.id)
+    ) or 0
+    return UserSummary(
+        id=u.id,
+        username=u.username,
+        role=u.role,
+        priority=u.priority,
+        max_templates=u.max_templates,
+        render_credits=u.render_credits,
+        is_active=u.is_active,
+        template_count=int(t_count),
+        job_count=int(j_count),
+    )
+
+
+def _purge_user_files(db: Session, user_id: int) -> None:
+    """Wipe templates / renders folders for every row owned by user_id.
+    Must be called BEFORE the cascade DELETE so we still see the IDs.
+    Best-effort : log + continue on errors so the DB cleanup still runs."""
+    template_ids = db.scalars(
+        select(Template.id).where(Template.owner_id == user_id)
+    ).all()
+    for tid in template_ids:
+        try:
+            shutil.rmtree(template_dir(tid), ignore_errors=True)
+        except Exception as e:
+            log.warning("purge template %s files failed: %s", tid, e)
+
+    job_ids = db.scalars(
+        select(RenderJob.id).where(RenderJob.owner_id == user_id)
+    ).all()
+    for jid in job_ids:
+        # Each job has both a directory of outputs and the ZIP next to it.
+        d = RENDERS_DIR / str(jid)
+        zip_path = RENDERS_DIR / f"{jid}.zip"
+        try:
+            shutil.rmtree(d, ignore_errors=True)
+            zip_path.unlink(missing_ok=True)
+        except Exception as e:
+            log.warning("purge job %s files failed: %s", jid, e)
+
+
+# ---- routes ----------------------------------------------------------
+
+@router.get("/users", response_model=list[UserSummary])
+def list_users(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+) -> list[UserSummary]:
+    users = db.scalars(select(User).order_by(User.created_at.asc())).all()
+    return [_summarize(db, u) for u in users]
+
+
+@router.post(
+    "/users",
+    response_model=UserSummary,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_user(
+    payload: UserCreate,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+) -> UserSummary:
+    # Admin role implicitly = unlimited templates + huge credits (we
+    # ignore the form values and force the defaults).
+    is_admin = payload.role == UserRole.admin
+    user = User(
+        username=payload.username,
+        password_hash=hash_password(payload.password),
+        role=payload.role,
+        priority=payload.priority,
+        max_templates=None if is_admin else payload.max_templates,
+        render_credits=10**9 if is_admin else payload.render_credits,
+        is_active=True,
+    )
+    db.add(user)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, f"Username {payload.username!r} déjà utilisé")
+    db.refresh(user)
+    return _summarize(db, user)
+
+
+@router.get("/users/{user_id}", response_model=UserSummary)
+def get_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+) -> UserSummary:
+    u = db.get(User, user_id)
+    if u is None:
+        raise HTTPException(404, "User non trouvé")
+    return _summarize(db, u)
+
+
+@router.patch("/users/{user_id}", response_model=UserSummary)
+def update_user(
+    user_id: int,
+    payload: UserUpdate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> UserSummary:
+    u = db.get(User, user_id)
+    if u is None:
+        raise HTTPException(404, "User non trouvé")
+
+    # Don't let the admin deactivate / demote themselves by accident — that
+    # would lock them out of the admin page on next refresh.
+    if u.id == admin.id:
+        if payload.is_active is False:
+            raise HTTPException(
+                400, "Tu ne peux pas désactiver ton propre compte."
+            )
+        if payload.role is not None and payload.role != UserRole.admin:
+            raise HTTPException(
+                400, "Tu ne peux pas retirer ton propre role admin."
+            )
+
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(u, key, value)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Username déjà utilisé")
+    db.refresh(u)
+    return _summarize(db, u)
+
+
+@router.post(
+    "/users/{user_id}/password",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def reset_password(
+    user_id: int,
+    payload: PasswordReset,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+) -> None:
+    u = db.get(User, user_id)
+    if u is None:
+        raise HTTPException(404, "User non trouvé")
+    u.password_hash = hash_password(payload.password)
+    db.commit()
+
+
+@router.post(
+    "/users/{user_id}/credits",
+    response_model=UserSummary,
+)
+def top_up_credits(
+    user_id: int,
+    payload: CreditsTopUp,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+) -> UserSummary:
+    """Additive top-up. Use PATCH /users/{id} body {render_credits: N}
+    if you want to SET the exact value instead."""
+    u = db.get(User, user_id)
+    if u is None:
+        raise HTTPException(404, "User non trouvé")
+    u.render_credits = (u.render_credits or 0) + payload.amount
+    db.commit()
+    db.refresh(u)
+    return _summarize(db, u)
+
+
+@router.delete(
+    "/users/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+) -> None:
+    """Hard delete : DROP the user row + cascade-delete his templates,
+    jobs, AND wipe his files on disk."""
+    if user_id == admin.id:
+        raise HTTPException(
+            400, "Tu ne peux pas supprimer ton propre compte."
+        )
+    u = db.get(User, user_id)
+    if u is None:
+        raise HTTPException(404, "User non trouvé")
+
+    # Wipe files BEFORE the DB cascade so we still know the IDs.
+    _purge_user_files(db, user_id)
+    db.delete(u)
+    db.commit()

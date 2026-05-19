@@ -9,8 +9,10 @@ import {
   ListTodo,
   LogOut,
   Rocket,
+  ShieldCheck,
 } from "lucide-react";
 import { Auth } from "@/lib/api";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { cn } from "@/lib/utils";
 
 type Item = {
@@ -34,6 +36,8 @@ function isActive(pathname: string, href: string): boolean {
 
 export function Sidebar() {
   const pathname = usePathname();
+  const me = useCurrentUser();
+  const isAdmin = me?.role === "admin";
   return (
     <aside
       className="fixed left-0 top-0 flex h-screen w-[200px] flex-col border-r border-border bg-sidebar text-sidebar-foreground"
@@ -63,7 +67,37 @@ export function Sidebar() {
             </Link>
           );
         })}
+        {isAdmin && (
+          <Link
+            href="/admin/users"
+            className={cn(
+              "mt-4 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm transition",
+              isActive(pathname, "/admin/users")
+                ? "bg-amber-500/15 text-amber-100"
+                : "text-amber-300 hover:bg-amber-500/10 hover:text-amber-100",
+            )}
+            aria-current={isActive(pathname, "/admin/users") ? "page" : undefined}
+          >
+            <ShieldCheck className="h-4 w-4" />
+            Admin
+          </Link>
+        )}
       </nav>
+      {me && (
+        <div className="border-t border-border px-3 py-2 text-[10px] text-muted-foreground">
+          <div className="font-medium text-foreground/80">{me.username}</div>
+          <div className="mt-0.5 flex items-center justify-between">
+            <span>
+              {me.role === "admin"
+                ? "Admin · illimité"
+                : `${me.render_credits} crédits`}
+            </span>
+            {me.role !== "admin" && me.max_templates != null && (
+              <span>{me.max_templates}× templates</span>
+            )}
+          </div>
+        </div>
+      )}
       {/* Phase 30 — logout button au bas de la sidebar */}
       <div className="border-t border-border p-3">
         <button
