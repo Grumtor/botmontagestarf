@@ -46,7 +46,7 @@ export default function JobDetailPage({
       // Stop polling once the job has reached a terminal state.
       if (job && (job.status === "done" || job.status === "failed")) return;
       void tick();
-    }, 2000);
+    }, 3000);
     return () => {
       cancelled = true;
       clearInterval(interval);

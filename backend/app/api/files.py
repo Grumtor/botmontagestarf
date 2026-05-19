@@ -39,6 +39,12 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 # client malveillant qui essaie de path-traverse.
 _FILE_ID_RE = re.compile(r"^[0-9a-fA-F]{32}$")
 
+# Cache durations. Les fichiers nommés par file_id (UUID) sont IMMUTABLES
+# par construction → cache long. Les previews/covers peuvent être
+# régénérées → cache court (la frontend bust avec ?t=updated_at).
+_CACHE_IMMUTABLE = "private, max-age=2592000, immutable"  # 30 jours
+_CACHE_MUTABLE = "private, max-age=86400"                  # 1 jour
+
 
 def _safe_file_id(file_id: str) -> str:
     """Reject anything that isn't a 32-char hex UUID. Returns the
@@ -77,7 +83,7 @@ def serve_asset(
     p = Path(rec.file_path)
     if not p.is_file():
         raise HTTPException(404, "Asset file missing on disk")
-    return FileResponse(p)
+    return FileResponse(p, headers={"Cache-Control": _CACHE_MUTABLE})
 
 
 @router.get("/template_clip/{template_id}/{file_id}")
@@ -92,7 +98,7 @@ def serve_template_clip(
     p = find_template_file(template_id, file_id, "clip")
     if p is None or not p.is_file():
         raise HTTPException(404, "Clip file not found")
-    return FileResponse(p)
+    return FileResponse(p, headers={"Cache-Control": _CACHE_IMMUTABLE})
 
 
 @router.get("/template_clip_thumb/{template_id}/{file_id}")
@@ -110,7 +116,10 @@ def serve_template_clip_thumb(
     p = template_clips_dir(template_id) / f"{file_id}_thumb.jpg"
     if not p.is_file():
         raise HTTPException(404, "Thumbnail not found")
-    return FileResponse(p, media_type="image/jpeg")
+    return FileResponse(
+        p, media_type="image/jpeg",
+        headers={"Cache-Control": _CACHE_IMMUTABLE},
+    )
 
 
 @router.get("/template_clip_strip/{template_id}/{file_id}")
@@ -130,7 +139,10 @@ def serve_template_clip_strip(
     p = template_clips_dir(template_id) / f"{file_id}_strip.jpg"
     if not p.is_file():
         raise HTTPException(404, "Filmstrip not found")
-    return FileResponse(p, media_type="image/jpeg")
+    return FileResponse(
+        p, media_type="image/jpeg",
+        headers={"Cache-Control": _CACHE_IMMUTABLE},
+    )
 
 
 @router.get("/template_overlay/{template_id}/{file_id}")
@@ -145,7 +157,7 @@ def serve_template_overlay(
     p = find_template_file(template_id, file_id, "overlay")
     if p is None or not p.is_file():
         raise HTTPException(404, "Overlay file not found")
-    return FileResponse(p)
+    return FileResponse(p, headers={"Cache-Control": _CACHE_IMMUTABLE})
 
 
 @router.get("/template_thumb/{template_id}")
@@ -158,7 +170,7 @@ def serve_template_thumb(
     p = template_thumb_path(template_id)
     if not p.is_file():
         raise HTTPException(404, "No thumbnail")
-    return FileResponse(p)
+    return FileResponse(p, headers={"Cache-Control": _CACHE_MUTABLE})
 
 
 @router.get("/template_cover/{template_id}")
@@ -179,7 +191,10 @@ def serve_template_cover(
         "png": "image/png",
         "webp": "image/webp",
     }.get(p.suffix.lstrip(".").lower(), "application/octet-stream")
-    return FileResponse(p, media_type=media)
+    return FileResponse(
+        p, media_type=media,
+        headers={"Cache-Control": _CACHE_MUTABLE},
+    )
 
 
 @router.get("/template_preview/{template_id}")
@@ -195,7 +210,10 @@ def serve_template_preview(
     p = template_preview_path(template_id)
     if not p.is_file():
         raise HTTPException(404, "No preview yet")
-    return FileResponse(p, media_type="video/mp4")
+    return FileResponse(
+        p, media_type="video/mp4",
+        headers={"Cache-Control": _CACHE_MUTABLE},
+    )
 
 
 @router.get("/render/{job_id}")
@@ -210,7 +228,12 @@ def serve_render_zip(
     p = Path(rec.output_zip_path)
     if not p.is_file():
         raise HTTPException(404, "ZIP file missing on disk")
-    return FileResponse(p, media_type="application/zip", filename=f"render_{job_id}.zip")
+    return FileResponse(
+        p,
+        media_type="application/zip",
+        filename=f"render_{job_id}.zip",
+        headers={"Cache-Control": _CACHE_IMMUTABLE},
+    )
 
 
 @router.get("/render_item/{job_id}/{index}")
@@ -233,4 +256,9 @@ def serve_render_item(
     mp = rec.metadata_profile or {}
     apple_map = mp.get("apple_name_by_path") or {}
     download_name = apple_map.get(str(p)) or apple_map.get(p.name) or p.name
-    return FileResponse(p, media_type="video/mp4", filename=download_name)
+    return FileResponse(
+        p,
+        media_type="video/mp4",
+        filename=download_name,
+        headers={"Cache-Control": _CACHE_IMMUTABLE},
+    )

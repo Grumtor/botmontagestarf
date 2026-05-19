@@ -146,13 +146,21 @@ def render_preview(
             fills,
             fill_missing_placeholders_with=placeholder_fallback_path(),
         )
+        # Preview lite : 540×960 (4× moins de pixels que 1080×1920),
+        # CRF 28 (compression visible mais OK pour un thumbnail card),
+        # preset veryfast (10× plus rapide à encoder). Économie totale
+        # ~5-10× bandwidth + CPU vs le render final, pour un usage
+        # ("petit aperçu sur card") où l'utilisateur ne verra pas la
+        # différence à 200×356 px d'affichage.
         run_render(
             template=template,
             ctx=ctx,
             output_path=output_path,
-            crf=18,
-            preset="slow",
+            crf=28,
+            preset="veryfast",
             timeout=600,
+            output_w=540,
+            output_h=960,
         )
     except Exception as e:
         output_path.unlink(missing_ok=True)

@@ -696,9 +696,16 @@ def run_render(
     crf: int = 18,
     preset: str = "slow",
     timeout: int = 1800,
+    output_w: int = OUTPUT_W,
+    output_h: int = OUTPUT_H,
 ) -> None:
-    """Invoke ffmpeg synchronously; raise on failure."""
-    text_png_inputs = _render_text_pngs(ctx, output_path, OUTPUT_W, OUTPUT_H)
+    """Invoke ffmpeg synchronously; raise on failure.
+
+    `output_w` / `output_h` permettent de downscale la sortie pour
+    générer une preview légère (ex: 540×960 au lieu de 1080×1920)
+    sans toucher au render final. Économie ~4× en pixels donc en
+    bandwidth et CPU."""
+    text_png_inputs = _render_text_pngs(ctx, output_path, output_w, output_h)
     cmd = build_render_command(
         clips=ctx.clips,
         extra_clips=ctx.extra_clips,
@@ -711,6 +718,8 @@ def run_render(
         crf=crf,
         preset=preset,
         text_png_inputs=text_png_inputs,
+        output_w=output_w,
+        output_h=output_h,
     )
     log.info("ffmpeg %s", " ".join(cmd))
     try:

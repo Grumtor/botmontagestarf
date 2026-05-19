@@ -36,6 +36,7 @@ from app.auth import COOKIE_NAME, auth_enabled, verify_session_token
 from app.config import settings
 from app.db import Base, engine
 from app.storage import (
+    cleanup_old_renders,
     cleanup_orphan_temp_uploads,
     ensure_dirs,
     ensure_placeholder_preview,
@@ -216,13 +217,19 @@ async def lifespan(app: FastAPI):
         log.exception("ensure_placeholder_preview failed: %s", e)
 
     # Garbage-collect uploads from abandoned dialogs older than 24h.
-    _step("6/7 cleanup_orphan_temp_uploads…")
+    _step("6/7 cleanup_orphan_temp_uploads + cleanup_old_renders…")
     try:
-        cleanup_orphan_temp_uploads(max_age_hours=24)
-        _step("    [OK] cleanup OK")
+        n_temp = cleanup_orphan_temp_uploads(max_age_hours=24)
+        # Phase 34 — purge des renders > 30 jours pour ne pas faire
+        # exploser le disque. La row DB du job reste (avec output_files
+        # vide), juste le ZIP + le dossier outputs disparaissent.
+        n_renders = cleanup_old_renders(max_age_days=30)
+        _step(
+            f"    [OK] cleanup OK (temp={n_temp}, renders={n_renders})"
+        )
     except Exception as e:
         _step(f"    [FAIL] cleanup failed: {e}")
-        log.exception("cleanup_orphan_temp_uploads failed: %s", e)
+        log.exception("cleanup_orphan_temp_uploads / cleanup_old_renders failed: %s", e)
 
     # Background render worker
     _step("7/7 start_worker…")

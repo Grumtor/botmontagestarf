@@ -45,6 +45,10 @@ export function TemplateCard({
 }: Props) {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Bandwidth saver : pause auto la vidéo quand la carte sort de l'écran.
+  // Sans ça, une vidéo loopée continue à consommer le réseau même quand
+  // l'utilisateur a scrollé loin / mis l'onglet en arrière-plan.
+  const cardRef = useRef<HTMLDivElement>(null);
 
   const [thumbError, setThumbError] = useState(false);
   // True once the custom cover image has 404'd → fall back to template_thumb.
@@ -94,6 +98,27 @@ export function TemplateCard({
     if (v) v.volume = effectiveVolume;
   }, [effectiveVolume]);
 
+  // Auto-pause when the card scrolls out of view. Saves bandwidth and
+  // CPU when the user has a long template list and the playing card
+  // ends up off-screen / in another tab.
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting && playing) {
+            setCurrentlyPlayingId(null);
+          }
+        }
+      },
+      // 25% du card doit être visible — sinon on pause.
+      { threshold: 0.25 },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [playing, setCurrentlyPlayingId]);
+
   function openEditor() {
     router.push(`/editor/${template.id}`);
   }
@@ -140,6 +165,7 @@ export function TemplateCard({
 
   return (
     <div
+      ref={cardRef}
       className="group relative flex flex-col overflow-hidden rounded-lg border border-border bg-card transition hover:border-ring"
     >
       {/* Video / thumbnail area — click toggles play/pause */}

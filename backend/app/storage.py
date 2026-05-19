@@ -238,6 +238,43 @@ def cleanup_orphan_temp_uploads(max_age_hours: int = 24) -> int:
     return deleted
 
 
+def cleanup_old_renders(max_age_days: int = 30) -> int:
+    """Bandwidth/disk saver : delete /data/renders/{jid}/ + {jid}.zip
+    older than `max_age_days`. The DB row for the job is kept (the user
+    sees an entry with `output_files=[]` and `has_zip=False`, which the
+    UI treats as "expired"). Returns the number of jobs purged.
+
+    Conservative on errors : log + continue so a single bad path doesn't
+    block all the other cleanups."""
+    import time
+
+    if not RENDERS_DIR.is_dir():
+        return 0
+    cutoff = time.time() - max_age_days * 86400
+    purged = 0
+    for p in RENDERS_DIR.iterdir():
+        try:
+            if p.stat().st_mtime >= cutoff:
+                continue
+        except Exception:
+            continue
+        try:
+            if p.is_dir():
+                import shutil
+                shutil.rmtree(p, ignore_errors=True)
+                purged += 1
+            elif p.is_file() and p.suffix == ".zip":
+                p.unlink(missing_ok=True)
+                purged += 1
+        except Exception as e:
+            log.warning("cleanup_old_renders: failed on %s: %s", p, e)
+    if purged:
+        log.info(
+            "Cleaned %d render(s) older than %d days", purged, max_age_days
+        )
+    return purged
+
+
 def template_dir(template_id: int) -> Path:
     return TEMPLATES_DIR / str(template_id)
 

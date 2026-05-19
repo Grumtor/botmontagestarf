@@ -25,24 +25,35 @@ export default function JobsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    let interval: ReturnType<typeof setTimeout> | null = null;
     async function tick() {
       try {
         const list = await Jobs.list();
         if (!cancelled) {
           setItems(list);
           setError(null);
+          // Polling adaptatif : 3s tant qu'un job est en cours (le user
+          // attend une progression), 15s quand tout est terminé (le
+          // user regarde juste l'historique → pas besoin d'être réactif).
+          const anyActive = list.some(
+            (j) => j.status === "queued" || j.status === "running",
+          );
+          const delay = anyActive ? 3000 : 15000;
+          interval = setTimeout(tick, delay);
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Erreur");
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Erreur");
+          interval = setTimeout(tick, 10000);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
     void tick();
-    const interval = setInterval(tick, 2000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (interval) clearTimeout(interval);
     };
   }, []);
 
@@ -51,7 +62,7 @@ export default function JobsPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Jobs</h1>
         <p className="text-sm text-muted-foreground">
-          Auto-refresh toutes les 2s.
+          Auto-refresh adaptatif : 3s tant qu&apos;un job tourne, 15s sinon.
         </p>
       </div>
 
