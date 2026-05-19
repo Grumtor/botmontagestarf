@@ -2,10 +2,13 @@
 
 import { useEffect, useState } from "react";
 import {
+  Check,
+  Copy,
   KeyRound,
   Loader2,
   PlusCircle,
   ShieldCheck,
+  Sparkles,
   Trash2,
   UserCog,
   Wallet,
@@ -312,6 +315,18 @@ export default function AdminUsersPage() {
 
 // ---- Sub-dialogs ------------------------------------------------------
 
+/** Génère un mot de passe aléatoire de 14 caractères mélangeant
+ *  lettres haut/bas, chiffres et symboles courants. Évite les chars
+ *  ambigus ($, `, ', etc.) qui peuvent foirer un copy-paste en
+ *  terminal / fichier .env. */
+function generateStrongPassword(): string {
+  const chars =
+    "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#%*+=?";
+  const out = new Uint8Array(14);
+  crypto.getRandomValues(out);
+  return Array.from(out, (b) => chars[b % chars.length]).join("");
+}
+
 function CreateUserDialog({
   open,
   onOpenChange,
@@ -321,6 +336,7 @@ function CreateUserDialog({
   onOpenChange: (v: boolean) => void;
   onCreated: () => void;
 }) {
+  const { toast } = useToast();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<RoleOpt>("user");
@@ -329,6 +345,12 @@ function CreateUserDialog({
   const [credits, setCredits] = useState<number>(50);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Quand non-null, on remplace le formulaire par la vue "success"
+  // qui affiche les credentials + bouton "Copier les identifiants".
+  const [successCreds, setSuccessCreds] = useState<
+    { username: string; password: string } | null
+  >(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -339,6 +361,8 @@ function CreateUserDialog({
       setMaxTemplates(5);
       setCredits(50);
       setError(null);
+      setSuccessCreds(null);
+      setCopied(false);
     }
   }, [open]);
 
@@ -355,8 +379,11 @@ function CreateUserDialog({
         max_templates: role === "admin" ? null : maxTemplates,
         render_credits: role === "admin" ? 1_000_000_000 : credits,
       });
+      // Rafraîchit la liste côté parent (l'user apparaît) mais on
+      // GARDE la modale ouverte pour afficher l'écran de
+      // confirmation avec les identifiants à copier.
       onCreated();
-      onOpenChange(false);
+      setSuccessCreds({ username, password });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur");
     } finally {
@@ -364,6 +391,63 @@ function CreateUserDialog({
     }
   }
 
+  async function copyCredentials() {
+    if (!successCreds) return;
+    const text =
+      `Grumtor.com\n` +
+      `Username : ${successCreds.username}\n` +
+      `Password : ${successCreds.password}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      toast({ title: "Identifiants copiés" });
+      // Reset l'icône check après 2s pour ne pas piéger l'admin si
+      // il copie de nouveau.
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast({
+        title: "Impossible de copier",
+        description: "Copie le texte manuellement.",
+      });
+    }
+  }
+
+  // ----- Success view : credentials + Copy -----
+  if (successCreds) {
+    const credsText =
+      `Grumtor.com\n` +
+      `Username : ${successCreds.username}\n` +
+      `Password : ${successCreds.password}`;
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Compte créé ✓</DialogTitle>
+            <DialogDescription>
+              Communique ces identifiants à la personne en main propre —
+              ils ne seront plus jamais affichés ailleurs.
+            </DialogDescription>
+          </DialogHeader>
+          <pre className="select-all whitespace-pre-wrap rounded-md border border-border bg-background/40 p-3 font-mono text-xs">
+            {credsText}
+          </pre>
+          <DialogFooter className="sm:justify-between">
+            <Button variant="outline" onClick={copyCredentials}>
+              {copied ? (
+                <Check className="h-4 w-4 text-emerald-400" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
+              {copied ? "Copié !" : "Copier les identifiants"}
+            </Button>
+            <Button onClick={() => onOpenChange(false)}>Terminé</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  // ----- Form view -----
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -384,12 +468,25 @@ function CreateUserDialog({
             />
           </Field>
           <Field label="Password initial">
-            <Input
-              type="text"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="min. 4 chars"
-            />
+            <div className="flex gap-2">
+              <Input
+                type="text"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="min. 4 chars"
+                className="flex-1 font-mono"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setPassword(generateStrongPassword())}
+                title="Générer un password aléatoire fort (14 chars)"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                Générer
+              </Button>
+            </div>
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Rôle">
