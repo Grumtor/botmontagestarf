@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 
 import { Admin, type AdminUser } from "@/lib/api";
-import { useCurrentUser } from "@/hooks/use-current-user";
+import { notifyUserRefresh, useCurrentUser } from "@/hooks/use-current-user";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -74,8 +74,12 @@ export default function AdminUsersPage() {
   }
 
   useEffect(() => {
+    // Skip le fetch tant qu'on ne sait pas si on est admin OU si on
+    // sait qu'on ne l'est pas (sinon le 403 affiche un "Not Found"
+    // rouge au-dessus du message "réservée").
+    if (me === null || me.role !== "admin") return;
     void refresh();
-  }, []);
+  }, [me]);
 
   // Redirect-ish : si on n'est pas admin, on affiche un message au lieu
   // de leak l'UI. L'API renvoie déjà 403 — c'est juste pour le rendu.
@@ -256,6 +260,10 @@ export default function AdminUsersPage() {
           onOpenChange={(v) => !v && setEditing(null)}
           onSaved={() => {
             void refresh();
+            // Si l'admin a édité son propre compte (crédits, role,
+            // priorité, etc.) → notifier les hooks pour que la sidebar
+            // affiche les nouvelles valeurs sans rechargement.
+            if (editing.id === me?.id) notifyUserRefresh();
             setEditing(null);
             toast({ title: "Utilisateur mis à jour" });
           }}
@@ -279,6 +287,8 @@ export default function AdminUsersPage() {
           onOpenChange={(v) => !v && setToppingUpFor(null)}
           onDone={() => {
             void refresh();
+            // Idem : top-up sur soi-même → sidebar refresh.
+            if (toppingUpFor.id === me?.id) notifyUserRefresh();
             setToppingUpFor(null);
             toast({ title: "Crédits ajoutés" });
           }}

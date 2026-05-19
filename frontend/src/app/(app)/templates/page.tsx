@@ -22,10 +22,12 @@ import { RunRenderDialog } from "@/components/templates/run-render-dialog";
 import { SampleVideoDialog } from "@/components/templates/sample-video-dialog";
 import { TemplateCard } from "@/components/templates/template-card";
 import { Templates, type Template, type TemplateCreateInput } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 
 export default function TemplatesPage() {
   const router = useRouter();
+  const { toast } = useToast();
   const [items, setItems] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -70,8 +72,21 @@ export default function TemplatesPage() {
   }, [items, language, search]);
 
   async function onCreate(data: TemplateCreateInput) {
-    const created = await Templates.create(data);
-    router.push(`/editor/${created.id}`);
+    try {
+      const created = await Templates.create(data);
+      router.push(`/editor/${created.id}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Erreur création";
+      // Backend returns 403 with a clear French message when the user's
+      // template limit is reached. Surface it as a toast — same UX as
+      // any other action error.
+      toast({
+        title: "Création impossible",
+        description: msg,
+      });
+      // Re-throw so the dialog stays open and the user can adjust.
+      throw err;
+    }
   }
 
   async function onDuplicate(id: number) {
@@ -79,7 +94,13 @@ export default function TemplatesPage() {
       const dup = await Templates.duplicate(id);
       setItems((prev) => [dup, ...prev]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur duplicate");
+      const msg = err instanceof Error ? err.message : "Erreur duplicate";
+      // 403 if max_templates atteint — même UX que ci-dessus.
+      toast({
+        title: "Duplication impossible",
+        description: msg,
+      });
+      setError(msg);
     }
   }
 

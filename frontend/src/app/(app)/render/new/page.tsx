@@ -32,6 +32,7 @@ import {
   type Template,
   type TemplateLanguage,
 } from "@/lib/api";
+import { notifyUserRefresh, useCurrentUser } from "@/hooks/use-current-user";
 import { cn } from "@/lib/utils";
 
 // ===== types =========================================================
@@ -219,6 +220,17 @@ export default function RenderWizardPage() {
 
   const overLimit = reelCount > 500;
 
+  // Phase 33 — gating sur les crédits du user. 1 reel = 1 crédit.
+  // Les admins ont des crédits "infinis" (10^9) donc le test passe
+  // tout le temps. Le bouton "Lancer" est désactivé quand on a
+  // moins de crédits que de reels demandés.
+  const me = useCurrentUser();
+  const creditsShortBy =
+    me && me.role !== "admin"
+      ? Math.max(0, reelCount - me.render_credits)
+      : 0;
+  const insufficientCredits = creditsShortBy > 0;
+
   // ===== step 1 actions ===========================================
 
   function patchPending(id: string, patch: Partial<Pending>) {
@@ -376,6 +388,9 @@ export default function RenderWizardPage() {
         // (metadata différentes pour mêmes assignments).
         mode === "random" ? "Tirage" : "Generation",
       );
+      // Le backend a décrémenté les crédits → on notifie la sidebar pour
+      // qu'elle re-fetch /api/auth/me et affiche le nouveau compteur.
+      notifyUserRefresh();
       router.push(`/jobs/${job.id}`);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Erreur");
@@ -498,15 +513,29 @@ export default function RenderWizardPage() {
             <ArrowRight className="h-4 w-4" />
           </Button>
         ) : (
-          <Button
-            onClick={onLaunch}
-            disabled={submitting || reelCount === 0 || overLimit}
-          >
-            <Rocket className="h-4 w-4" />
-            {submitting
-              ? "Envoi…"
-              : `Lancer ${reelCount} reel${reelCount > 1 ? "s" : ""}`}
-          </Button>
+          <div className="flex flex-col items-end gap-1">
+            {insufficientCredits && me && (
+              <p className="text-[11px] text-destructive">
+                ⚠ {creditsShortBy} crédit{creditsShortBy > 1 ? "s" : ""}{" "}
+                manquant{creditsShortBy > 1 ? "s" : ""} ({me.render_credits}{" "}
+                dispo, {reelCount} demandés). Demande à l&apos;admin.
+              </p>
+            )}
+            <Button
+              onClick={onLaunch}
+              disabled={
+                submitting ||
+                reelCount === 0 ||
+                overLimit ||
+                insufficientCredits
+              }
+            >
+              <Rocket className="h-4 w-4" />
+              {submitting
+                ? "Envoi…"
+                : `Lancer ${reelCount} reel${reelCount > 1 ? "s" : ""}`}
+            </Button>
+          </div>
         )}
       </div>
     </div>
