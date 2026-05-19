@@ -69,6 +69,18 @@ async function requestVoid(path: string, init?: RequestInit): Promise<void> {
 // pour que le cookie de session soit bien posé sur le domaine racine
 // (.grumtor.com) et partagé entre bot.* et api.*.
 
+// Phase 33 — public-safe view of the authenticated user.
+export const UserMeSchema = z.object({
+  id: z.number(),
+  username: z.string(),
+  role: z.enum(["admin", "user"]),
+  priority: z.enum(["high", "normal", "low"]),
+  max_templates: z.number().nullable(),
+  render_credits: z.number(),
+  is_active: z.boolean(),
+});
+export type UserMe = z.infer<typeof UserMeSchema>;
+
 export const Auth = {
   /** Logout : invalide le cookie côté serveur ET côté client. */
   logout: async (): Promise<void> => {
@@ -92,6 +104,22 @@ export const Auth = {
       return res.ok;
     } catch {
       return false;
+    }
+  },
+
+  /** Fetch the current user's profile (id, username, role, priority,
+   *  max_templates, render_credits). Returns null on 401. */
+  whoami: async (): Promise<UserMe | null> => {
+    try {
+      const res = await fetch(`${BACKEND_DIRECT_URL}/api/auth/me`, {
+        credentials: "include",
+      });
+      if (!res.ok) return null;
+      const body = await res.json();
+      const r = UserMeSchema.safeParse(body?.user);
+      return r.success ? r.data : null;
+    } catch {
+      return null;
     }
   },
 };

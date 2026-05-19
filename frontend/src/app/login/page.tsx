@@ -27,6 +27,7 @@ function LoginForm() {
   const next = params.get("next") || "/";
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +49,7 @@ function LoginForm() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!password) return;
+    if (!username || !password) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -57,7 +58,7 @@ function LoginForm() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ username, password }),
       });
       if (!res.ok) {
         if (res.status === 429) {
@@ -88,9 +89,19 @@ function LoginForm() {
         {" "}pour plus d&apos;information
       </a>
 
-      <form onSubmit={onSubmit} className="w-full">
+      <form onSubmit={onSubmit} className="flex w-full flex-col gap-2">
         <input
           ref={inputRef}
+          type="text"
+          autoComplete="username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="username"
+          disabled={submitting}
+          className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-4 py-3 text-center text-sm text-zinc-100 placeholder-zinc-600 outline-none transition focus:border-zinc-600 disabled:opacity-50"
+          aria-label="Nom d'utilisateur"
+        />
+        <input
           type="password"
           autoComplete="current-password"
           value={password}
@@ -102,8 +113,8 @@ function LoginForm() {
         />
         <button
           type="submit"
-          disabled={submitting || !password}
-          className="mt-3 w-full rounded-md border border-zinc-800 bg-zinc-900 py-3 text-sm text-zinc-300 transition hover:border-zinc-600 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={submitting || !username || !password}
+          className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-900 py-3 text-sm text-zinc-300 transition hover:border-zinc-600 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submitting ? "…" : "Entrer"}
         </button>

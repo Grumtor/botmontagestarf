@@ -20,7 +20,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.db.models import JobStatus, RenderJob, Template
+from app.db.models import JobStatus, RenderJob, Template, User
+from app.users import require_user
 from app.worker import queue_render_job
 
 router = APIRouter(prefix="/api", tags=["jobs"])
@@ -107,7 +108,9 @@ class DashboardStats(BaseModel):
     status_code=status.HTTP_201_CREATED,
 )
 def create_batch(
-    payload: RenderBatchRequest, db: Session = Depends(get_db)
+    payload: RenderBatchRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> RenderJob:
     # Phase 29 — multi-pass assignments. Deux sources possibles :
     #   1. Le frontend a déjà multi-passed (random reroll : 3 tirages
@@ -145,13 +148,33 @@ def create_batch(
             f"tu as {len(expanded_assignments)} reels demandés.",
         )
 
+    # Templates must exist AND be owned by the requesting user.
     template_ids = {a.template_id for a in payload.assignments}
-    found = {
-        t.id for t in db.query(Template).filter(Template.id.in_(template_ids)).all()
+    owned = {
+        t.id
+        for t in db.query(Template)
+        .filter(Template.id.in_(template_ids), Template.owner_id == user.id)
+        .all()
     }
-    missing = template_ids - found
+    missing = template_ids - owned
     if missing:
-        raise HTTPException(400, f"Unknown template_ids={sorted(missing)}")
+        raise HTTPException(
+            400,
+            f"Templates inconnus ou pas les tiens : {sorted(missing)}",
+        )
+
+    # Phase 33 — per-user render credits. 1 credit = 1 reel.
+    # Admin has effectively unlimited credits (10^9 at bootstrap).
+    cost = len(expanded_assignments)
+    if user.render_credits < cost:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"Crédits insuffisants : il te faut {cost} crédits "
+                f"({cost} reels à produire), tu en as {user.render_credits}. "
+                f"Demande à l'admin d'en ajouter."
+            ),
+        )
 
     # Stash naming style + pass label alongside the metadata profile so
     # the render task can read them without changing its function sig.
@@ -160,6 +183,7 @@ def create_batch(
     metadata_profile["pass_label"] = payload.pass_label
 
     job = RenderJob(
+        owner_id=user.id,
         name=payload.name,
         status=JobStatus.queued,
         assignments=expanded_assignments,
@@ -168,10 +192,15 @@ def create_batch(
         output_files=[],
     )
     db.add(job)
+    # Decrement credits in the same transaction so a parallel batch
+    # can't double-spend.
+    user.render_credits -= cost
     db.commit()
     db.refresh(job)
 
-    queue_render_job(job.id)
+    # Worker prioritises high < normal < low. We pass the user.priority
+    # so it ends up in the right queue.
+    queue_render_job(job.id, priority=user.priority.value)
     return job
 
 
@@ -179,9 +208,11 @@ def create_batch(
 def list_jobs(
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> list[JobSummary]:
     rows = (
         db.query(RenderJob)
+        .filter(RenderJob.owner_id == user.id)
         .order_by(RenderJob.created_at.desc())
         .limit(limit)
         .all()
@@ -202,16 +233,25 @@ def list_jobs(
 
 
 @router.get("/jobs/{job_id}", response_model=JobRead)
-def get_job(job_id: int, db: Session = Depends(get_db)) -> RenderJob:
+def get_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+) -> RenderJob:
     job = db.get(RenderJob, job_id)
-    if job is None:
+    if job is None or job.owner_id != user.id:
         raise HTTPException(404, "Job not found")
     return job
 
 
 @router.get("/dashboard/stats", response_model=DashboardStats)
-def dashboard_stats(db: Session = Depends(get_db)) -> DashboardStats:
+def dashboard_stats(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+) -> DashboardStats:
     return DashboardStats(
-        template_count=db.query(Template).count(),
-        render_count=db.query(RenderJob).count(),
+        template_count=db.query(Template)
+        .filter(Template.owner_id == user.id).count(),
+        render_count=db.query(RenderJob)
+        .filter(RenderJob.owner_id == user.id).count(),
     )

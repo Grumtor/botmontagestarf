@@ -32,7 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.db.models import Template, TemplateLanguage
+from app.db.models import Template, TemplateLanguage, User
 from app.media import MediaError, make_video_thumb, video_metadata
 from app.storage import (
     find_template_cover,
@@ -41,8 +41,19 @@ from app.storage import (
     template_dir,
     template_overlays_dir,
 )
+from app.users import require_user
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
+
+
+def _get_owned_template(db: Session, tid: int, user: User) -> Template:
+    """Fetch a template and verify ownership. Raises 404 if not found
+    OR not owned by `user`. We deliberately return 404 (not 403) to
+    avoid leaking the existence of templates owned by other users."""
+    template = db.get(Template, tid)
+    if template is None or template.owner_id != user.id:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return template
 
 UPLOAD_MAX_BYTES = 500 * 1024 * 1024
 CHUNK = 1024 * 1024
@@ -124,9 +135,30 @@ class CoverResponse(BaseModel):
 
 @router.post("", response_model=TemplateRead, status_code=status.HTTP_201_CREATED)
 def create_template(
-    payload: TemplateCreate, db: Session = Depends(get_db)
+    payload: TemplateCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> Template:
+    # Phase 33 — per-user template count cap (admin = unlimited via
+    # user.max_templates == None).
+    if user.max_templates is not None:
+        from sqlalchemy import func as sa_func, select as sa_select
+        n = db.scalar(
+            sa_select(sa_func.count())
+            .select_from(Template)
+            .where(Template.owner_id == user.id)
+        ) or 0
+        if n >= user.max_templates:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Limite atteinte : tu as déjà {n} templates "
+                    f"(max {user.max_templates}). Supprime-en un ou "
+                    f"demande à l'admin d'augmenter ta limite."
+                ),
+            )
     template = Template(
+        owner_id=user.id,
         name=payload.name,
         language=payload.language,
         description=payload.description,
@@ -150,28 +182,31 @@ def create_template(
 def list_templates(
     language: Optional[TemplateLanguage] = Query(default=None),
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> list[Template]:
-    q = db.query(Template)
+    q = db.query(Template).filter(Template.owner_id == user.id)
     if language is not None:
         q = q.filter(Template.language == language)
     return q.order_by(Template.updated_at.desc()).all()
 
 
 @router.get("/{template_id}", response_model=TemplateRead)
-def get_template(template_id: int, db: Session = Depends(get_db)) -> Template:
-    template = db.get(Template, template_id)
-    if template is None:
-        raise HTTPException(status_code=404, detail="Template not found")
-    return template
+def get_template(
+    template_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+) -> Template:
+    return _get_owned_template(db, template_id, user)
 
 
 @router.put("/{template_id}", response_model=TemplateRead)
 def update_template(
-    template_id: int, payload: TemplateUpdate, db: Session = Depends(get_db)
+    template_id: int,
+    payload: TemplateUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> Template:
-    template = db.get(Template, template_id)
-    if template is None:
-        raise HTTPException(status_code=404, detail="Template not found")
+    template = _get_owned_template(db, template_id, user)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(template, field, value)
     db.commit()
@@ -180,11 +215,12 @@ def update_template(
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_template(template_id: int, db: Session = Depends(get_db)) -> None:
-    template = db.get(Template, template_id)
-    if template is None:
-        raise HTTPException(status_code=404, detail="Template not found")
-    # Wipe the per-template folder (clips + overlays + thumbnail).
+def delete_template(
+    template_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+) -> None:
+    template = _get_owned_template(db, template_id, user)
     shutil.rmtree(template_dir(template_id), ignore_errors=True)
     db.delete(template)
     db.commit()
@@ -196,13 +232,30 @@ def delete_template(template_id: int, db: Session = Depends(get_db)) -> None:
     status_code=status.HTTP_201_CREATED,
 )
 def duplicate_template(
-    template_id: int, db: Session = Depends(get_db)
+    template_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> Template:
-    src = db.get(Template, template_id)
-    if src is None:
-        raise HTTPException(status_code=404, detail="Template not found")
+    src = _get_owned_template(db, template_id, user)
+    # Apply the template-count limit to duplications too.
+    if user.max_templates is not None:
+        from sqlalchemy import func as sa_func, select as sa_select
+        n = db.scalar(
+            sa_select(sa_func.count())
+            .select_from(Template)
+            .where(Template.owner_id == user.id)
+        ) or 0
+        if n >= user.max_templates:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Limite atteinte : tu as déjà {n} templates "
+                    f"(max {user.max_templates})."
+                ),
+            )
 
     clone = Template(
+        owner_id=user.id,
         name=f"{src.name} (copy)",
         description=src.description,
         language=src.language,
@@ -304,11 +357,11 @@ async def upload_clip(
     template_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> ClipUploadResponse:
     """Upload a fixed video clip for a template. Returns a file_id the
     frontend embeds in `template.clips[i].file_id`."""
-    if db.get(Template, template_id) is None:
-        raise HTTPException(404, "Template not found")
+    _get_owned_template(db, template_id, user)
 
     original = file.filename or "clip"
     ext = Path(original).suffix.lower()
@@ -432,11 +485,11 @@ async def upload_overlay(
     template_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> OverlayUploadResponse:
     """Upload an image/gif/audio used by a layer or audio_overlay of a
     specific template."""
-    if db.get(Template, template_id) is None:
-        raise HTTPException(404, "Template not found")
+    _get_owned_template(db, template_id, user)
 
     original = file.filename or "overlay"
     ext = Path(original).suffix.lower()
@@ -502,6 +555,7 @@ def use_clip_audio_as_overlay(
     template_id: int,
     clip_id: str,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> Template:
     """Extract the audio of one of the template's fixed clips and set it
     as the global audio overlay (Phase 25 feature B). Mutes the source
@@ -511,9 +565,7 @@ def use_clip_audio_as_overlay(
     video clip while the visual is a placeholder for the first N seconds."""
     from app.bin_finder import ffmpeg_env, ffmpeg_exe
 
-    template = db.get(Template, template_id)
-    if template is None:
-        raise HTTPException(404, "Template not found")
+    template = _get_owned_template(db, template_id, user)
 
     clips = list(template.clips or [])
     target_idx: Optional[int] = None
@@ -646,6 +698,7 @@ def set_cover_from_time(
     template_id: int,
     payload: CoverFromTimeRequest,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> CoverResponse:
     """Extract a frame from the cached preview MP4 at `time_sec` and
     save it as the template's cover image. Requires a preview to exist
@@ -653,9 +706,7 @@ def set_cover_from_time(
     from app.bin_finder import ffmpeg_env, ffmpeg_exe
     from app.storage import template_preview_path
 
-    template = db.get(Template, template_id)
-    if template is None:
-        raise HTTPException(404, "Template not found")
+    template = _get_owned_template(db, template_id, user)
 
     preview_path = template_preview_path(template_id)
     if not preview_path.is_file():
@@ -720,12 +771,12 @@ def set_cover_from_time(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 def delete_cover(
-    template_id: int, db: Session = Depends(get_db)
+    template_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> None:
     """Drop the custom cover and revert to the auto-extracted thumbnail."""
-    template = db.get(Template, template_id)
-    if template is None:
-        raise HTTPException(404, "Template not found")
+    template = _get_owned_template(db, template_id, user)
     prev = find_template_cover(template_id)
     if prev is not None:
         prev.unlink(missing_ok=True)

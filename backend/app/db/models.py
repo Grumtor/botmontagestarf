@@ -4,9 +4,11 @@ from typing import Optional
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     Enum as SAEnum,
     Float,
+    ForeignKey,
     Integer,
     String,
     Text,
@@ -15,6 +17,57 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
+
+
+class UserRole(str, enum.Enum):
+    admin = "admin"
+    user = "user"
+
+
+class UserPriority(str, enum.Enum):
+    """Render queue priority. Lower string sorts first in the worker
+    queue mapping: high=0, normal=1, low=2."""
+    high = "high"
+    normal = "normal"
+    low = "low"
+
+
+class User(Base):
+    """Account record. Admin (= toi) crée ces lignes manuellement via la
+    page /admin/users. Pas de signup, pas de reset password, pas d'email
+    — c'est intentionnellement minimaliste."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    role: Mapped[UserRole] = mapped_column(
+        SAEnum(UserRole, name="user_role"),
+        default=UserRole.user,
+        nullable=False,
+    )
+    priority: Mapped[UserPriority] = mapped_column(
+        SAEnum(UserPriority, name="user_priority"),
+        default=UserPriority.normal,
+        nullable=False,
+    )
+    # null = unlimited (admin default). For regular users, the admin
+    # sets a cap at creation time and may bump it later.
+    max_templates: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # 1 credit = 1 reel généré. Decremented when a batch is queued.
+    # Admin tops up manually via /admin/users.
+    render_credits: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
 
 class TemplateLanguage(str, enum.Enum):
@@ -50,6 +103,13 @@ class Template(Base):
     __tablename__ = "templates"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Phase 33 — multi-tenant : chaque template appartient à un user.
+    # Les queries CRUD filtrent toujours par owner_id == current_user.
+    # nullable=True le temps de la migration de la DB existante ; le code
+    # post-bootstrap garantit que chaque ligne a un owner.
+    owner_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     language: Mapped[TemplateLanguage] = mapped_column(
@@ -120,6 +180,10 @@ class RenderJob(Base):
     __tablename__ = "render_jobs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Phase 33 — multi-tenant. Le job est owned par l'user qui l'a lancé.
+    owner_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[JobStatus] = mapped_column(
         SAEnum(JobStatus, name="job_status"),

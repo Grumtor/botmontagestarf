@@ -31,13 +31,14 @@ from sqlalchemy.orm import Session
 import shutil
 
 from app.db import get_db
-from app.db.models import Template
+from app.db.models import Template, User
 from app.render.batch_runner import gather_render_inputs, run_render
 from app.storage import (
     TEMP_DIR,
     placeholder_fallback_path,
     template_preview_path,
 )
+from app.users import require_user
 
 log = logging.getLogger(__name__)
 
@@ -63,7 +64,10 @@ class PreviewRequest(BaseModel):
 
 
 @router.post("/upload", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
-async def upload_user_video(file: UploadFile = File(...)) -> UploadResponse:
+async def upload_user_video(
+    file: UploadFile = File(...),
+    user: User = Depends(require_user),
+) -> UploadResponse:
     """Stash a user-supplied video in /data/temp/. Returns a token the
     frontend embeds in subsequent /preview or /batch requests."""
     original = file.filename or "video.mp4"
@@ -120,12 +124,13 @@ def render_preview(
     payload: PreviewRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    user: User = Depends(require_user),
 ) -> FileResponse:
     """Render a single preview MP4 for one template + given fills.
     Same quality settings as production batch renders (CRF 18, preset slow)
     so the card preview matches what gets exported."""
     template = db.get(Template, payload.template_id)
-    if template is None:
+    if template is None or template.owner_id != user.id:
         raise HTTPException(404, "Template not found")
 
     fills = {f.clip_id: f.token for f in payload.fills}

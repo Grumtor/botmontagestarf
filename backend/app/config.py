@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     # Cookie is HttpOnly + Secure + SameSite=Lax in all cases.
     botmontage_session_max_age: int = 60 * 60 * 24 * 3650
 
+    # ----- Multi-tenant (Phase 33) ----------------------------------
+    # Username assigned to the bootstrap admin if the users table is empty.
+    # The password hash comes from BOTMONTAGE_PASSWORD_HASH above (legacy
+    # field), so existing single-user installs upgrade in place without
+    # losing access.
+    botmontage_admin_username: str = "admin"
+
     @property
     def database_url(self) -> str:
         return f"sqlite:///{self.data_dir}/botmontage.db"

@@ -57,13 +57,19 @@ def hash_password(plain: str) -> str:
 
 
 def verify_password(plain: str) -> bool:
-    """Constant-time verify against the configured hash. Returns
-    True only on exact match; False on any failure (no info leak)."""
-    h = settings.botmontage_password_hash
-    if not h:
+    """Legacy single-user verify against the env hash. Kept for the
+    bootstrap-admin code path. Returns True only on exact match."""
+    return verify_password_against(plain, settings.botmontage_password_hash or "")
+
+
+def verify_password_against(plain: str, password_hash: str) -> bool:
+    """Constant-time verify of `plain` against an arbitrary Argon2id
+    `password_hash`. Returns True iff they match, False on any failure
+    (no info leak)."""
+    if not password_hash:
         return False
     try:
-        return _HASHER.verify(h, plain)
+        return _HASHER.verify(password_hash, plain)
     except (VerifyMismatchError, InvalidHashError, Exception) as e:
         # Don't log the password (obviously) — only the failure type.
         log.warning("password verify failed: %s", type(e).__name__)
@@ -82,34 +88,43 @@ def _serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(secret, salt=_SERIALIZER_SALT)
 
 
-def create_session_token() -> str:
-    """Create a signed token marking the holder as authenticated.
-    Payload is minimal — no PII (it's single-user anyway). Signature
-    via HMAC-SHA256 makes it tamper-proof : flipping any character
+def create_session_token(user_id: int) -> str:
+    """Create a signed token carrying the user_id. Signature via
+    HMAC-SHA256 makes it tamper-proof : flipping any character
     invalidates the signature."""
-    payload = {"v": 1, "iat": int(time.time())}
+    payload = {"v": 2, "uid": user_id, "iat": int(time.time())}
     return _serializer().dumps(payload)
 
 
-def verify_session_token(token: str) -> bool:
-    """Validate a signed token : signature OK + age within max_age.
-    Returns True iff both pass."""
+def parse_session_token(token: str) -> Optional[int]:
+    """Validate a signed token and return the user_id, or None on
+    failure (bad sig, expired, malformed)."""
     try:
-        _serializer().loads(
+        payload = _serializer().loads(
             token,
             max_age=settings.botmontage_session_max_age,
         )
-        return True
+        if not isinstance(payload, dict):
+            return None
+        uid = payload.get("uid")
+        if isinstance(uid, int):
+            return uid
+        return None
     except SignatureExpired:
-        return False
+        return None
     except BadSignature:
-        return False
+        return None
     except Exception as e:
         log.warning("session token parse failed: %s", type(e).__name__)
-        return False
+        return None
 
 
-# ----- FastAPI dependency --------------------------------------------
+def verify_session_token(token: str) -> bool:
+    """Back-compat alias. True iff the token decodes to a valid user_id."""
+    return parse_session_token(token) is not None
+
+
+# ----- FastAPI dependencies ------------------------------------------
 
 def require_auth(request: Request) -> None:
     """Use as `Depends(require_auth)` on any protected endpoint.
@@ -123,6 +138,22 @@ def require_auth(request: Request) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
         )
+
+
+def current_user_id(request: Request) -> Optional[int]:
+    """Return the authenticated user_id, or None when auth is disabled
+    (legacy open mode). When auth is enabled and no valid token is
+    present, raises 401."""
+    if not auth_enabled():
+        return None
+    token = request.cookies.get(COOKIE_NAME)
+    uid = parse_session_token(token) if token else None
+    if uid is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+    return uid
 
 
 # ----- rate limit for the login endpoint -----------------------------

@@ -113,10 +113,84 @@ async def lifespan(app: FastAPI):
             with engine.begin() as conn:
                 conn.execute(text("DROP TABLE IF EXISTS virtual_assistants"))
             _step("    - virtual_assistants dropped")
+
+        # Phase 33 — multi-tenant: add owner_id columns to templates +
+        # render_jobs. Nullable until bootstrap-admin step below assigns
+        # ownership of legacy rows.
+        if "owner_id" not in existing_cols:
+            with engine.begin() as conn:
+                conn.execute(
+                    text("ALTER TABLE templates ADD COLUMN owner_id INTEGER")
+                )
+            _step("    + templates.owner_id added")
+        rj_cols = {c["name"] for c in inspector.get_columns("render_jobs")}
+        if "owner_id" not in rj_cols:
+            with engine.begin() as conn:
+                conn.execute(
+                    text("ALTER TABLE render_jobs ADD COLUMN owner_id INTEGER")
+                )
+            _step("    + render_jobs.owner_id added")
         _step("    [OK] migrations OK")
     except Exception as e:
         _step(f"    [FAIL] migrations failed: {e}")
         log.exception("template column migration failed: %s", e)
+
+    # Phase 33 — bootstrap admin user if the users table is empty AND a
+    # legacy BOTMONTAGE_PASSWORD_HASH is set. The legacy hash becomes the
+    # admin's password (no need to re-set anything). All existing
+    # templates / render_jobs are assigned owner_id = admin.id so they
+    # remain accessible.
+    _step("3b/7 bootstrap admin user (if needed)…")
+    try:
+        from sqlalchemy import func as sa_func, select, update
+        from app.db import SessionLocal
+        from app.db.models import User, UserRole, UserPriority, Template, RenderJob
+        with SessionLocal() as db:
+            n_users = db.scalar(select(sa_func.count()).select_from(User))
+            if n_users == 0:
+                legacy_hash = settings.botmontage_password_hash
+                if legacy_hash:
+                    admin = User(
+                        username=getattr(
+                            settings, "botmontage_admin_username", "admin"
+                        ),
+                        password_hash=legacy_hash,
+                        role=UserRole.admin,
+                        priority=UserPriority.high,
+                        max_templates=None,           # unlimited
+                        render_credits=10**9,         # effectively unlimited
+                        is_active=True,
+                    )
+                    db.add(admin)
+                    db.commit()
+                    db.refresh(admin)
+                    # Assign every existing template + render_job to this
+                    # admin so we don't end up with orphans after the FK
+                    # check tightens.
+                    db.execute(
+                        update(Template).where(Template.owner_id.is_(None))
+                        .values(owner_id=admin.id)
+                    )
+                    db.execute(
+                        update(RenderJob).where(RenderJob.owner_id.is_(None))
+                        .values(owner_id=admin.id)
+                    )
+                    db.commit()
+                    _step(
+                        f"    + admin user '{admin.username}' created "
+                        f"(id={admin.id}) + legacy rows assigned"
+                    )
+                else:
+                    _step(
+                        "    [WARN] users table empty AND no legacy "
+                        "BOTMONTAGE_PASSWORD_HASH — auth disabled until "
+                        "you set one (or seed an admin manually)"
+                    )
+            else:
+                _step(f"    [OK] {n_users} user(s) already present")
+    except Exception as e:
+        _step(f"    [FAIL] bootstrap admin failed: {e}")
+        log.exception("bootstrap admin failed: %s", e)
 
     # Built-in fonts (Inter / Montserrat from system packages, copied into
     # the data dir so the renderer always finds them at a stable path).
