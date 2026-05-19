@@ -9,7 +9,6 @@ import {
   ListTodo,
   LogOut,
   Rocket,
-  Users,
 } from "lucide-react";
 import { Auth } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -25,7 +24,6 @@ const items: Item[] = [
   { href: "/render/new", label: "Nouveau render", icon: Rocket },
   { href: "/templates", label: "Templates", icon: Layers },
   { href: "/photos", label: "Photos", icon: Camera },
-  { href: "/vas", label: "VAs", icon: Users },
   { href: "/jobs", label: "Jobs", icon: ListTodo },
 ];
 

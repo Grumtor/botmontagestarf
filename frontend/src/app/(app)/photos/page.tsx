@@ -1,11 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { Camera, Download, Image as ImageIcon, Upload, Users, X } from "lucide-react";
+import { useState } from "react";
+import { Camera, Download, Image as ImageIcon, Upload, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import {
   Select,
@@ -14,13 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Photos,
-  VAs,
-  type PhotoDistribution,
-  type PhotoSpoofProfile,
-  type VA,
-} from "@/lib/api";
+import { Photos, type PhotoSpoofProfile } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // Same world as the video wizard.
@@ -110,14 +102,6 @@ export default function PhotosPage() {
   const [language, setLanguage] = useState("en-US");
   const [dateWindow, setDateWindow] = useState(7);
   const [drag, setDrag] = useState(false);
-
-  // VA mode (multi-select)
-  const [vaList, setVaList] = useState<VA[]>([]);
-  const [selectedVaIds, setSelectedVaIds] = useState<Set<number>>(() => new Set());
-  const [filenameBase, setFilenameBase] = useState("photo");
-  const [distribution, setDistribution] =
-    useState<PhotoDistribution>("broadcast");
-  const [allowLoop, setAllowLoop] = useState(false);
   // Phase 29 — multiplicateur générations + naming Apple iPhone.
   const [generations, setGenerations] = useState(1);
   const [iphoneNaming, setIphoneNaming] = useState(true);
@@ -129,43 +113,7 @@ export default function PhotosPage() {
     { url: string; filename: string; spoofed: number; skipped: number } | null
   >(null);
 
-  useEffect(() => {
-    VAs.list()
-      .then(setVaList)
-      .catch(() => {
-        /* fine, the user just hasn't created any */
-      });
-  }, []);
-
-  const selectedVas = useMemo(
-    () => vaList.filter((v) => selectedVaIds.has(v.id)),
-    [vaList, selectedVaIds],
-  );
-
-  const totalAccounts = selectedVas.reduce((sum, va) => sum + va.account_count, 0);
-
-  // Compute the actual number of outputs depending on the distribution.
-  const totalOutputs = (() => {
-    if (selectedVas.length === 0) return files.length;
-    if (distribution === "one_per_account") return totalAccounts;
-    return files.length * totalAccounts;
-  })();
-
-  // Whether ANY selected VA exceeds N_photos in one_per_account mode.
-  const oneNeedsLoop =
-    selectedVas.length > 0 &&
-    distribution === "one_per_account" &&
-    files.length > 0 &&
-    selectedVas.some((va) => va.account_count > files.length);
-
-  function toggleVa(id: number) {
-    setSelectedVaIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
+  const totalOutputs = files.length * generations;
 
   function onCountryChange(c: string) {
     setCountry(c);
@@ -230,14 +178,6 @@ export default function PhotosPage() {
         date_window_days: dateWindow,
         generations,
         naming: iphoneNaming ? "iphone" : "default",
-        ...(selectedVas.length > 0
-          ? {
-              va_ids: selectedVas.map((v) => v.id),
-              filename_base: filenameBase || "photo",
-              distribution,
-              allow_loop: allowLoop,
-            }
-          : {}),
       };
       const res = await Photos.spoof(
         files.map((p) => p.file),
@@ -246,12 +186,7 @@ export default function PhotosPage() {
       );
       const url = URL.createObjectURL(res.zipBlob);
       const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      const zipName =
-        selectedVas.length === 0
-          ? `photos_spoofed_${stamp}.zip`
-          : selectedVas.length === 1
-            ? `${selectedVas[0].name}_${filenameBase || "photo"}_${stamp}.zip`
-            : `export_${selectedVas.length}_VAs_${filenameBase || "photo"}_${stamp}.zip`;
+      const zipName = `photos_spoofed_${stamp}.zip`;
       setResult({
         url,
         filename: zipName,
@@ -280,11 +215,8 @@ export default function PhotosPage() {
         </h1>
         <p className="text-sm text-muted-foreground">
           Drop des photos, choisis un ou plusieurs modèles iPhone + un pays.
-          Sans VA = ZIP plat. Avec VA = ZIP structuré{" "}
-          <code className="rounded bg-background px-1">
-            VA / Compte N / fichier_M.jpg
-          </code>{" "}
-          (1 modèle aléatoire par compte).
+          Le ZIP contient les photos avec EXIF re-écrites (GPS, date, lens,
+          ISO aléatoires).
         </p>
       </div>
 
@@ -380,177 +312,19 @@ export default function PhotosPage() {
         </div>
       )}
 
-      {/* VA section */}
-      <div className="space-y-3 rounded-lg border border-border bg-card p-4">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-medium">Structure d&apos;export</div>
-          <Link
-            href="/vas"
-            className="text-[11px] text-muted-foreground underline hover:text-foreground"
-          >
-            Gérer les VA →
-          </Link>
-        </div>
-
-        {/* Multi-select VA chips */}
-        <div className="space-y-1.5">
-          <div className="text-xs text-muted-foreground">
-            VAs (optionnel — coche un ou plusieurs pour structurer l&apos;export)
-          </div>
-          {vaList.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground italic">
-              Aucun VA. <Link href="/vas" className="underline hover:text-foreground">Crée-en un →</Link>
-            </p>
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {vaList.map((va) => {
-                const active = selectedVaIds.has(va.id);
-                return (
-                  <button
-                    key={va.id}
-                    type="button"
-                    onClick={() => toggleVa(va.id)}
-                    className={cn(
-                      "rounded-md border px-2.5 py-1 text-[11px] transition",
-                      active
-                        ? "border-primary bg-accent"
-                        : "border-border hover:bg-accent/50",
-                    )}
-                  >
-                    {va.name}{" "}
-                    <span className="opacity-60">
-                      ({va.account_count})
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {selectedVas.length > 0 && (
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="text-muted-foreground">
-              Nom de fichier (base)
-            </span>
-            <Input
-              value={filenameBase}
-              onChange={(e) => setFilenameBase(e.target.value)}
-              placeholder="photo"
-              className="h-9 text-sm"
-            />
-          </label>
-        )}
-
-        {/* Distribution toggle — only relevant in VA mode */}
-        {selectedVas.length > 0 && (
-          <div className="space-y-2">
-            <div className="text-xs text-muted-foreground">
-              Mode de distribution
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <DistributionCard
-                active={distribution === "broadcast"}
-                onClick={() => setDistribution("broadcast")}
-                title="Broadcast"
-                subtitle="Toutes les photos dans chaque compte"
-                example={
-                  files.length > 0
-                    ? `Ex: ${files.length} photo${files.length > 1 ? "s" : ""} × ${totalAccounts} comptes = ${files.length * totalAccounts} fichiers (mêmes photos, métadonnées différentes)`
-                    : "Ex: 5 photos × 15 comptes = 75 fichiers (le même feed posté sur tous les comptes)"
-                }
-              />
-              <DistributionCard
-                active={distribution === "one_per_account"}
-                onClick={() => setDistribution("one_per_account")}
-                title="1 par compte"
-                subtitle="1 photo unique par compte (photos de profil)"
-                example={
-                  files.length > 0
-                    ? `Ex: ${files.length} photo${files.length > 1 ? "s" : ""} → ${totalAccounts} comptes = ${totalAccounts} fichiers (1 photo par compte, random pick)`
-                    : "Ex: 15 photos → 15 comptes = 15 fichiers (Compte 1 reçoit photo X, Compte 2 reçoit photo Y, etc.)"
-                }
-              />
-            </div>
-
-            {/* Allow loop checkbox — only when one_per_account + at least one VA exceeds N */}
-            {oneNeedsLoop && (
-              <label className="flex cursor-pointer items-center gap-2 rounded-md border border-yellow-500/40 bg-yellow-700/10 p-2 text-[11px] text-yellow-200">
-                <input
-                  type="checkbox"
-                  checked={allowLoop}
-                  onChange={(e) => setAllowLoop(e.target.checked)}
-                  className="h-3.5 w-3.5 accent-yellow-500"
-                />
-                <span>
-                  OK même si moins de photos ({files.length}) que de comptes
-                  dans certains VAs — boucler le pool
-                </span>
-              </label>
-            )}
-
-            {/* Per-VA recap */}
-            <div className="space-y-1 rounded-md border border-yellow-500/30 bg-yellow-700/10 p-2 text-[11px] text-yellow-200/90">
-              <div className="flex items-center gap-2">
-                <Users className="h-3.5 w-3.5 shrink-0" />
-                <span>
-                  Total :{" "}
-                  <strong className="text-yellow-100">{totalOutputs}</strong>{" "}
-                  photo{totalOutputs > 1 ? "s" : ""} dans{" "}
-                  <strong>{totalAccounts}</strong> dossier
-                  {totalAccounts > 1 ? "s" : ""} sur{" "}
-                  <strong>{selectedVas.length}</strong> VA
-                  {selectedVas.length > 1 ? "s" : ""}
-                </span>
-              </div>
-              <ul className="ml-5 list-disc text-[10px] text-yellow-200/70">
-                {selectedVas.map((va) => {
-                  const perVa =
-                    distribution === "one_per_account"
-                      ? va.account_count
-                      : files.length * va.account_count;
-                  return (
-                    <li key={va.id}>
-                      <code className="rounded bg-background/40 px-1">
-                        {va.name}
-                      </code>{" "}
-                      → {va.account_count} compte
-                      {va.account_count > 1 ? "s" : ""} = {perVa} fichier
-                      {perVa > 1 ? "s" : ""}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-
-            {oneNeedsLoop && !allowLoop && (
-              <p className="text-[11px] text-destructive">
-                ⚠ Au moins un VA a plus de comptes que tu n&apos;as de photos
-                ({files.length}). Coche la case ci-dessus pour boucler, ou
-                upload plus de photos.
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-
       {/* Spoofing profile */}
       <div className="space-y-3 rounded-lg border border-border bg-card p-4">
         <div className="text-sm font-medium">Profil de spoofing</div>
 
-        {/* Modèles iPhone — par défaut iPhone 17 (pas besoin de choisir).
-            Click "Changer" pour révéler le multi-select. */}
+        {/* Modèles iPhone — par défaut iPhone 17. Click "Changer" pour
+            révéler le multi-select. */}
         <div className="space-y-1.5">
           <div className="text-xs text-muted-foreground">
-            Modèle iPhone
-            {selectedVas.length > 0
-              ? " — aléatoire par compte"
-              : " — aléatoire par photo"}
+            Modèle iPhone — aléatoire par photo
           </div>
           <div className="flex items-center gap-2">
             <span className="rounded-md border border-border bg-background px-2.5 py-1 text-[11px]">
               📱 {Array.from(selectedModels).join(", ")}
-              {selectedModels.size > 1 ? "" : ""}
             </span>
             <button
               type="button"
@@ -634,7 +408,8 @@ export default function PhotosPage() {
               className="w-full accent-primary"
             />
             <span className="text-[10px] text-muted-foreground">
-              x2 = chaque output dupliqué avec EXIF différents.
+              x2 = chaque photo dupliquée avec EXIF différents (sous-dossiers
+              Generation 1/2/…).
             </span>
           </label>
           <button
@@ -654,7 +429,7 @@ export default function PhotosPage() {
             <span className="text-[10px] text-muted-foreground">
               {iphoneNaming
                 ? "IMG_xxxx.JPG, compteur continu"
-                : "Garde les noms originaux / VA"}
+                : "Garde les noms originaux"}
             </span>
           </button>
         </div>
@@ -696,64 +471,16 @@ export default function PhotosPage() {
         <Button
           onClick={onLaunch}
           disabled={
-            submitting ||
-            files.length === 0 ||
-            selectedModels.size === 0 ||
-            (oneNeedsLoop && !allowLoop)
+            submitting || files.length === 0 || selectedModels.size === 0
           }
         >
           <Camera className="h-4 w-4" />
           {submitting
             ? "Envoi…"
-            : selectedVas.length > 0
-              ? `Générer ${totalOutputs} photo${totalOutputs > 1 ? "s" : ""}`
-              : `Spoofer ${files.length} photo${files.length > 1 ? "s" : ""}`}
+            : `Spoofer ${totalOutputs} photo${totalOutputs > 1 ? "s" : ""}`}
         </Button>
       </div>
     </div>
-  );
-}
-
-function DistributionCard({
-  active,
-  onClick,
-  title,
-  subtitle,
-  example,
-}: {
-  active: boolean;
-  onClick: () => void;
-  title: string;
-  subtitle: string;
-  example: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex flex-col items-start gap-1 rounded-md border-2 p-2.5 text-left transition",
-        active
-          ? "border-primary bg-accent"
-          : "border-border bg-card hover:border-ring",
-      )}
-    >
-      <div className="flex w-full items-center gap-2">
-        <span
-          className={cn(
-            "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border-2 transition",
-            active ? "border-primary" : "border-muted-foreground/40",
-          )}
-        >
-          {active && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
-        </span>
-        <span className="text-xs font-semibold">{title}</span>
-      </div>
-      <span className="pl-5 text-[10px] text-muted-foreground">{subtitle}</span>
-      <span className="pl-5 text-[10px] leading-snug text-muted-foreground/80">
-        {example}
-      </span>
-    </button>
   );
 }
 

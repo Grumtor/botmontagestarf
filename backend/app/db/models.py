@@ -112,30 +112,6 @@ class Asset(Base):
     )
 
 
-class VirtualAssistant(Base):
-    """A "Virtual Assistant" is a persistent label + account count used to
-    organise bulk exports. One VA has N accounts; at export time we
-    duplicate every input file into N folders (one per account), each
-    with independently spoofed metadata and a (random) iPhone model.
-
-    Reused across photo exports and (eventually) reel exports.
-    """
-
-    __tablename__ = "virtual_assistants"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
-    account_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )
-
 
 class RenderJob(Base):
     """One job spawns N renders. Each render = one template + a mapping

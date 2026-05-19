@@ -31,7 +31,6 @@ from app.api.photos import router as photos_router
 from app.api.render import router as render_router
 from app.api.sample_video import router as sample_video_router
 from app.api.templates import router as templates_router
-from app.api.vas import router as vas_router
 from app.auth import COOKIE_NAME, auth_enabled, verify_session_token
 from app.config import settings
 from app.db import Base, engine
@@ -107,6 +106,13 @@ async def lifespan(app: FastAPI):
                     )
                 )
             _step("    + extra_tracks added")
+        # Phase 32 — drop the legacy virtual_assistants table (feature
+        # removed entirely). DROP IF EXISTS is idempotent.
+        all_tables = set(inspector.get_table_names())
+        if "virtual_assistants" in all_tables:
+            with engine.begin() as conn:
+                conn.execute(text("DROP TABLE IF EXISTS virtual_assistants"))
+            _step("    - virtual_assistants dropped")
         _step("    [OK] migrations OK")
     except Exception as e:
         _step(f"    [FAIL] migrations failed: {e}")
@@ -206,7 +212,6 @@ app.include_router(files_router)
 app.include_router(render_router)
 app.include_router(jobs_router)
 app.include_router(photos_router)
-app.include_router(vas_router)
 app.include_router(sample_video_router)
 
 

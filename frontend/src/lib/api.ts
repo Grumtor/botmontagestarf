@@ -638,35 +638,19 @@ export const SampleVideo = {
 
 // ===== photos (bulk EXIF metadata spoofing) ==========================
 
-export type PhotoDistribution = "broadcast" | "one_per_account";
-
 export type PhotoSpoofProfile = {
-  /** One or more iPhone models. Random pick per photo (flat mode) or per
-   *  account (VA mode). At least one required. */
+  /** One or more iPhone models. Random pick per photo. */
   models: string[];
   country: string;
   language?: string;
   date_window_days: number;
-  /** Zero or more VAs. When non-empty, organize the output ZIP into
-   *  `{VA}/Compte N/…` folders. Each selected VA is processed
-   *  independently — its account count drives its own subtree. */
-  va_ids?: number[];
-  /** Custom filename base for VA exports. Defaults to "photo". */
-  filename_base?: string;
-  /** Photo→account distribution mode (VA-only):
-   *   - "broadcast" (default) : every photo lands in every account folder
-   *   - "one_per_account"     : exactly 1 photo per account (random pick) */
-  distribution?: PhotoDistribution;
-  /** When `distribution=one_per_account` and N_photos < N_accounts, allow
-   *  cycling the pool to fill the missing accounts. False raises 400. */
-  allow_loop?: boolean;
   /** Phase 29 — Number of "generations" : duplicate output set N times
    *  with fresh randomized metadata (different iPhone model, GPS, ISO,
    *  date) for each pass. Default 1. Range 1-10. */
   generations?: number;
   /** Phase 29 — Naming style. "iphone" → IMG_xxxx.{EXT} continuous
    *  counter starting random in [1500, 9000]. "default" → keep
-   *  generated names (filename_base/source name). */
+   *  source names. */
   naming?: "iphone" | "default";
 };
 
@@ -676,40 +660,10 @@ export type PhotoSpoofResult = {
   skippedCount: number;
 };
 
-// ===== virtual assistants ============================================
-
-export const VASchema = z.object({
-  id: z.number(),
-  name: z.string(),
-  account_count: z.number(),
-  created_at: z.string(),
-  updated_at: z.string(),
-});
-export type VA = z.infer<typeof VASchema>;
-
-export type VACreateInput = { name: string; account_count: number };
-export type VAUpdateInput = Partial<VACreateInput>;
-
-export const VAs = {
-  list: () => request(z.array(VASchema), "/api/vas"),
-  create: (data: VACreateInput) =>
-    request(VASchema, "/api/vas", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-  update: (id: number, data: VAUpdateInput) =>
-    request(VASchema, `/api/vas/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
-  delete: (id: number) => requestVoid(`/api/vas/${id}`, { method: "DELETE" }),
-};
-
 export const Photos = {
   /** Upload N images with a spoofing profile, get back a ZIP of the
    *  metadata-rewritten files. Each photo gets an INDEPENDENT random
-   *  tirage of date / GPS / lens / ISO / aperture / exposure. When
-   *  profile.va_id is set, the ZIP is structured into per-account folders. */
+   *  tirage of date / GPS / lens / ISO / aperture / exposure. */
   spoof: async (
     files: File[],
     profile: PhotoSpoofProfile,
@@ -722,12 +676,6 @@ export const Photos = {
       fd.append("country", profile.country);
       if (profile.language) fd.append("language", profile.language);
       fd.append("date_window_days", String(profile.date_window_days));
-      if (profile.va_ids && profile.va_ids.length > 0) {
-        for (const id of profile.va_ids) fd.append("va_ids", String(id));
-      }
-      if (profile.filename_base) fd.append("filename_base", profile.filename_base);
-      if (profile.distribution) fd.append("distribution", profile.distribution);
-      if (profile.allow_loop) fd.append("allow_loop", "true");
       if (profile.generations && profile.generations > 1) {
         fd.append("generations", String(profile.generations));
       }
