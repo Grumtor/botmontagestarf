@@ -12,8 +12,14 @@ URL pattern: /api/files/{kind}/{...}
 Phase 33 — multi-tenant : tous les endpoints qui dépendent d'un template
 ou d'un job vérifient l'ownership. 404 (pas 403) pour ne pas leak
 l'existence d'objets appartenant à d'autres users.
+
+Sécurité (Phase 34) :
+  * file_id passé en URL est validé contre le format UUID hex 32-char
+    pour fermer la porte au path traversal (../../../etc/passwd).
+  * tout endpoint requires require_user via Depends.
 """
 
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -27,6 +33,20 @@ from app.storage import find_template_cover, template_thumb_path
 from app.users import require_user
 
 router = APIRouter(prefix="/api/files", tags=["files"])
+
+# file_id est généré côté backend via uuid.uuid4().hex → 32 chars
+# hexadécimaux. Tout ce qui s'en éloigne est forcément forgé par un
+# client malveillant qui essaie de path-traverse.
+_FILE_ID_RE = re.compile(r"^[0-9a-fA-F]{32}$")
+
+
+def _safe_file_id(file_id: str) -> str:
+    """Reject anything that isn't a 32-char hex UUID. Returns the
+    validated value (lowercased) or raises 404 (vague — pas la peine
+    d'aider l'attaquant à comprendre où il s'est trompé)."""
+    if not _FILE_ID_RE.match(file_id):
+        raise HTTPException(404, "Not found")
+    return file_id.lower()
 
 
 def _check_template_access(db: Session, template_id: int, user: User) -> None:
@@ -67,6 +87,7 @@ def serve_template_clip(
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ) -> FileResponse:
+    file_id = _safe_file_id(file_id)
     _check_template_access(db, template_id, user)
     p = find_template_file(template_id, file_id, "clip")
     if p is None or not p.is_file():
@@ -84,6 +105,7 @@ def serve_template_clip_thumb(
     """Serve the JPEG thumbnail extracted from a fixed clip at upload."""
     from app.storage import template_clips_dir
 
+    file_id = _safe_file_id(file_id)
     _check_template_access(db, template_id, user)
     p = template_clips_dir(template_id) / f"{file_id}_thumb.jpg"
     if not p.is_file():
@@ -103,6 +125,7 @@ def serve_template_clip_strip(
     across the clip block so the user can see what's inside the video."""
     from app.storage import template_clips_dir
 
+    file_id = _safe_file_id(file_id)
     _check_template_access(db, template_id, user)
     p = template_clips_dir(template_id) / f"{file_id}_strip.jpg"
     if not p.is_file():
@@ -117,6 +140,7 @@ def serve_template_overlay(
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ) -> FileResponse:
+    file_id = _safe_file_id(file_id)
     _check_template_access(db, template_id, user)
     p = find_template_file(template_id, file_id, "overlay")
     if p is None or not p.is_file():

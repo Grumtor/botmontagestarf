@@ -10,15 +10,17 @@ import logging
 import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
+from app.db.models import User
 from app.media import MediaError, video_metadata
 from app.storage import (
     SAMPLE_VIDEO_PATH,
     invalidate_template_previews,
 )
+from app.users import require_admin, require_user
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +39,7 @@ class SampleVideoInfo(BaseModel):
 
 
 @router.get("/info", response_model=SampleVideoInfo)
-def get_info() -> SampleVideoInfo:
+def get_info(_user: User = Depends(require_user)) -> SampleVideoInfo:
     if not SAMPLE_VIDEO_PATH.is_file():
         return SampleVideoInfo(exists=False)
     try:
@@ -58,7 +60,7 @@ def get_info() -> SampleVideoInfo:
 
 
 @router.get("")
-def serve() -> FileResponse:
+def serve(_user: User = Depends(require_user)) -> FileResponse:
     if not SAMPLE_VIDEO_PATH.is_file():
         raise HTTPException(404, "Aucune vidéo exemple uploadée")
     return FileResponse(
@@ -69,7 +71,10 @@ def serve() -> FileResponse:
 
 
 @router.post("", response_model=SampleVideoInfo, status_code=status.HTTP_201_CREATED)
-async def upload(file: UploadFile = File(...)) -> SampleVideoInfo:
+async def upload(
+    file: UploadFile = File(...),
+    _admin: User = Depends(require_admin),
+) -> SampleVideoInfo:
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED_EXTS:
         raise HTTPException(
@@ -110,7 +115,7 @@ async def upload(file: UploadFile = File(...)) -> SampleVideoInfo:
 
 
 @router.delete("")
-def delete_sample() -> Response:
+def delete_sample(_admin: User = Depends(require_admin)) -> Response:
     if SAMPLE_VIDEO_PATH.is_file():
         try:
             SAMPLE_VIDEO_PATH.unlink()

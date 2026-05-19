@@ -12,8 +12,9 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.db.models import Asset, AssetType
+from app.db.models import Asset, AssetType, User
 from app.storage import ASSET_DIRS
+from app.users import require_admin, require_user
 
 router = APIRouter(prefix="/api/assets", tags=["assets"])
 
@@ -35,6 +36,7 @@ class AssetRead(BaseModel):
 async def upload_font(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
 ) -> Asset:
     original = file.filename or "unknown"
     ext = Path(original).suffix.lower()
@@ -74,7 +76,10 @@ async def upload_font(
 
 
 @router.get("", response_model=list[AssetRead])
-def list_fonts(db: Session = Depends(get_db)) -> list[Asset]:
+def list_fonts(
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_user),
+) -> list[Asset]:
     return (
         db.query(Asset)
         .filter(Asset.type == AssetType.font)
@@ -84,7 +89,11 @@ def list_fonts(db: Session = Depends(get_db)) -> list[Asset]:
 
 
 @router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_font(asset_id: int, db: Session = Depends(get_db)) -> None:
+def delete_font(
+    asset_id: int,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+) -> None:
     rec = db.get(Asset, asset_id)
     if rec is None or rec.type != AssetType.font:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Font not found")

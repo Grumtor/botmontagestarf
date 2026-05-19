@@ -38,9 +38,12 @@ class Settings(BaseSettings):
     # single-host prod). Set to `.grumtor.com` to share cookies between
     # bot.grumtor.com (frontend) and api.grumtor.com (backend).
     botmontage_session_cookie_domain: str = ""
-    # Session lifetime in seconds. Default 10 years = "permanent" cookie.
-    # Cookie is HttpOnly + Secure + SameSite=Lax in all cases.
-    botmontage_session_max_age: int = 60 * 60 * 24 * 3650
+    # Session lifetime in seconds. Default 30 jours — bon compromis
+    # entre confort utilisateur (pas de re-login chaque jour) et fenêtre
+    # de compromission d'un cookie volé (max 30 jours avant que le
+    # browser le drop). Cookie est HttpOnly + Secure + SameSite=Strict.
+    # Override via env si besoin (mais ne pas dépasser 90 jours).
+    botmontage_session_max_age: int = 60 * 60 * 24 * 30
 
     # ----- Multi-tenant (Phase 33) ----------------------------------
     # Username assigned to the bootstrap admin if the users table is empty.

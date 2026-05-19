@@ -242,9 +242,39 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # Hygiène : on liste explicitement les méthodes et les headers
+    # plutôt que "*". `allow_credentials=True` combiné à un wildcard
+    # `allow_origins` serait refusé par le navigateur de toutes façons,
+    # mais autant fermer la porte à la configuration ambiguë.
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Inject hardening headers on every response. Cloudflare en ajoute
+    déjà certains mais on les met explicitement pour ne pas dépendre
+    d'eux."""
+    response = await call_next(request)
+    # Empêche le browser de "deviner" le content-type (mitige XSS via
+    # contenu uploadé servi comme HTML).
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    # Bloque le framing — l'app ne doit pas pouvoir être embed dans une
+    # iframe externe (mitige clickjacking).
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    # Limite le leak d'URL via le Referer header.
+    response.headers.setdefault(
+        "Referrer-Policy", "strict-origin-when-cross-origin"
+    )
+    # CSP minimaliste sur les routes API (renvoient du JSON, pas
+    # d'exécution JS). Pour les pages HTML (servies par Next.js, pas
+    # par FastAPI), c'est Next qui doit poser sa propre CSP.
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault(
+            "Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"
+        )
+    return response
 
 
 # Phase 30 — auth middleware. Protects every /api/* endpoint by

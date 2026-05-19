@@ -18,6 +18,7 @@ from app.auth import (
     COOKIE_NAME,
     auth_enabled,
     create_session_token,
+    extract_client_ip,
     rate_check,
     rate_record_attempt,
     verify_password_against,
@@ -70,7 +71,12 @@ def _set_session_cookie(response: Response, token: str) -> None:
         max_age=settings.botmontage_session_max_age,
         httponly=True,
         secure=True,
-        samesite="lax",
+        # SameSite=Strict bloque la transmission du cookie sur TOUTE
+        # requête cross-site (y compris navigation top-level depuis un
+        # site externe). bot.grumtor.com et api.grumtor.com sont same-
+        # site via la registrable domain — la communication entre les
+        # 2 reste fonctionnelle.
+        samesite="strict",
         path="/",
         domain=domain,
     )
@@ -97,8 +103,11 @@ def login(
     on bad credentials ; 429 if rate-limited. All error responses are
     deliberately vague to not leak info (is-it-a-bad-username vs
     bad-password indistinguishable)."""
-    ip = request.client.host if request.client else "unknown"
-    retry_after = rate_check(ip)
+    # Use the REAL client IP (CF-Connecting-IP / X-Forwarded-For)
+    # behind the Cloudflare Tunnel — otherwise everyone shares the
+    # tunnel's local socket IP and is rate-limited together.
+    ip = extract_client_ip(request)
+    retry_after = rate_check(ip, username=payload.username)
     if retry_after is not None:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -118,7 +127,7 @@ def login(
         and user.is_active
         and verify_password_against(payload.password, user.password_hash)
     )
-    rate_record_attempt(ip, success=ok)
+    rate_record_attempt(ip, success=ok, username=payload.username)
 
     if not ok or user is None:
         raise HTTPException(

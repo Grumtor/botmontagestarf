@@ -167,35 +167,87 @@ _RATE_MAX_PER_WINDOW = 5    # cap inside the window
 _LOCKOUT_AFTER = 10         # total failures before long lockout
 _LOCKOUT_DURATION = 15 * 60 # 15-minute lockout
 
+# Per-username rate limit (in addition to per-IP). Blocks brute force on
+# a specific account even when the attacker rotates through IPs (which
+# is trivial behind any CDN / VPN). Independent counters & lockouts.
+_USERNAME_RATE: dict[str, dict[str, float]] = {}
+_USERNAME_RATE_MAX_PER_WINDOW = 5
+_USERNAME_LOCKOUT_AFTER = 10
+_USERNAME_LOCKOUT_DURATION = 15 * 60
+
 
 def _now() -> float:
     return time.time()
 
 
-def rate_check(ip: str) -> Optional[float]:
-    """Return None if the request is allowed, or the seconds to wait
-    if the IP is rate-limited / locked out."""
-    entry = _RATE.setdefault(ip, {"attempts_total": 0, "window_start": 0, "window_count": 0, "locked_until": 0})
+def extract_client_ip(request: Request) -> str:
+    """Extract the real client IP, taking proxy headers into account.
 
-    # Lockout state ?
+    Behind Cloudflare Tunnel, `request.client.host` is the tunnel's
+    local socket, not the actual user. We honour CF-Connecting-IP
+    first (CF-only, easy to spoof if the backend was direct-accessible
+    but here it's only reachable via cloudflared so it's trusted) then
+    X-Forwarded-For (standard reverse-proxy header), finally fall back
+    to the socket address."""
+    cf_ip = request.headers.get("cf-connecting-ip")
+    if cf_ip:
+        return cf_ip.strip()
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        # XFF can be a comma-separated chain ; the FIRST entry is the
+        # original client (subsequent entries = intermediate proxies).
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _check_bucket(
+    entry: dict[str, float],
+    window_sec: float,
+    max_per_window: int,
+) -> Optional[float]:
+    """Shared logic for both per-IP and per-username rate buckets."""
     if entry["locked_until"] > _now():
         return entry["locked_until"] - _now()
-
-    # Window state (reset if older than _RATE_WINDOW_SEC).
-    if _now() - entry["window_start"] > _RATE_WINDOW_SEC:
+    if _now() - entry["window_start"] > window_sec:
         entry["window_start"] = _now()
         entry["window_count"] = 0
-
-    if entry["window_count"] >= _RATE_MAX_PER_WINDOW:
-        return _RATE_WINDOW_SEC - (_now() - entry["window_start"])
-
+    if entry["window_count"] >= max_per_window:
+        return window_sec - (_now() - entry["window_start"])
     return None
 
 
-def rate_record_attempt(ip: str, *, success: bool) -> None:
-    """Record an attempt (success resets the counters, failure
-    increments and may trigger lockout)."""
-    entry = _RATE.setdefault(ip, {"attempts_total": 0, "window_start": 0, "window_count": 0, "locked_until": 0})
+def rate_check(ip: str, username: Optional[str] = None) -> Optional[float]:
+    """Return None if the request is allowed, or the seconds to wait
+    if either the IP OR the username is rate-limited / locked out."""
+    ip_entry = _RATE.setdefault(
+        ip,
+        {"attempts_total": 0, "window_start": 0, "window_count": 0, "locked_until": 0},
+    )
+    delay = _check_bucket(ip_entry, _RATE_WINDOW_SEC, _RATE_MAX_PER_WINDOW)
+    if delay is not None:
+        return delay
+
+    if username:
+        u_entry = _USERNAME_RATE.setdefault(
+            username,
+            {"attempts_total": 0, "window_start": 0, "window_count": 0, "locked_until": 0},
+        )
+        delay = _check_bucket(
+            u_entry, _RATE_WINDOW_SEC, _USERNAME_RATE_MAX_PER_WINDOW
+        )
+        if delay is not None:
+            return delay
+    return None
+
+
+def _record_in_bucket(
+    entry: dict[str, float],
+    *,
+    success: bool,
+    lockout_after: int,
+    lockout_duration: float,
+    label: str,
+) -> None:
     if success:
         entry["attempts_total"] = 0
         entry["window_count"] = 0
@@ -203,7 +255,41 @@ def rate_record_attempt(ip: str, *, success: bool) -> None:
         return
     entry["window_count"] += 1
     entry["attempts_total"] += 1
-    if entry["attempts_total"] >= _LOCKOUT_AFTER:
-        entry["locked_until"] = _now() + _LOCKOUT_DURATION
+    if entry["attempts_total"] >= lockout_after:
+        entry["locked_until"] = _now() + lockout_duration
         entry["attempts_total"] = 0
-        log.warning("IP %s locked out after %d failed login attempts", ip, _LOCKOUT_AFTER)
+        log.warning(
+            "%s locked out after %d failed login attempts",
+            label, lockout_after,
+        )
+
+
+def rate_record_attempt(
+    ip: str, *, success: bool, username: Optional[str] = None
+) -> None:
+    """Record an attempt (success resets the counters, failure
+    increments). Both per-IP and per-username (if given) buckets are
+    updated independently."""
+    ip_entry = _RATE.setdefault(
+        ip,
+        {"attempts_total": 0, "window_start": 0, "window_count": 0, "locked_until": 0},
+    )
+    _record_in_bucket(
+        ip_entry,
+        success=success,
+        lockout_after=_LOCKOUT_AFTER,
+        lockout_duration=_LOCKOUT_DURATION,
+        label=f"IP {ip}",
+    )
+    if username:
+        u_entry = _USERNAME_RATE.setdefault(
+            username,
+            {"attempts_total": 0, "window_start": 0, "window_count": 0, "locked_until": 0},
+        )
+        _record_in_bucket(
+            u_entry,
+            success=success,
+            lockout_after=_USERNAME_LOCKOUT_AFTER,
+            lockout_duration=_USERNAME_LOCKOUT_DURATION,
+            label=f"username {username!r}",
+        )
