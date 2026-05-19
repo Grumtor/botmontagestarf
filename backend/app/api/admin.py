@@ -230,21 +230,21 @@ def update_user(
     return _summarize(db, u)
 
 
-@router.post(
-    "/users/{user_id}/password",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
+@router.post("/users/{user_id}/password")
 def reset_password(
     user_id: int,
     payload: PasswordReset,
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
-) -> None:
+) -> dict:
+    # FastAPI 0.115 rejette `status_code=204` + un corps de réponse
+    # (même implicite). On retourne 200 + {"ok": true}.
     u = db.get(User, user_id)
     if u is None:
         raise HTTPException(404, "User non trouvé")
     u.password_hash = hash_password(payload.password)
     db.commit()
+    return {"ok": True}
 
 
 @router.post(
@@ -268,17 +268,16 @@ def top_up_credits(
     return _summarize(db, u)
 
 
-@router.delete(
-    "/users/{user_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
+@router.delete("/users/{user_id}")
 def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
-) -> None:
+) -> dict:
     """Hard delete : DROP the user row + cascade-delete his templates,
     jobs, AND wipe his files on disk."""
+    # FastAPI 0.115 + status 204 = pas de body autorisé. On retourne
+    # 200 + {"ok": true} comme partout ailleurs.
     if user_id == admin.id:
         raise HTTPException(
             400, "Tu ne peux pas supprimer ton propre compte."
@@ -291,3 +290,4 @@ def delete_user(
     _purge_user_files(db, user_id)
     db.delete(u)
     db.commit()
+    return {"ok": True}
