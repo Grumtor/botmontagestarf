@@ -112,12 +112,39 @@ def _ff(value: str) -> MP4FreeForm:
 
 
 def write_mp4_atoms(filepath: Path, *, model: str, creation_iso: str, iso6709: str) -> None:
-    # mutagen >= 1.45 expects freeform keys in `----:MEAN:NAME` form
-    # (colon separator between the iTunes-style mean namespace and the
-    # atom name). Earlier versions tolerated dots; current does not.
+    """Write QuickTime user atoms — but SKIP `make` and `model`.
+
+    Phase 31b — Test empirique confirmé : la combinaison
+        com.apple.quicktime:make = "Apple"
+        com.apple.quicktime:model = "iPhone 17"
+    fait basculer iOS Photos / Safari / Telegram-iOS sur leur codec
+    path "vraie vidéo iPhone hardware". Ce path s'attend à un track
+    audio encodé par le silicium Apple (codec/path Apple-spécifique).
+    Notre AAC vient de Lavc (ffmpeg) : iOS arrive à décoder les
+    samples (d'où la barre de niveau qui bouge sur le téléphone) mais
+    ne sait pas les router vers les haut-parleurs → muet total côté
+    hardware. Sur PC, le decoder software ignore cette distinction.
+
+    Workaround : on n'écrit plus `make` et `model` dans les atoms QT.
+    iOS Photos voit le container comme un MP4 standard et lit notre
+    AAC sans souci. Le spoof reste effectif côté TikTok/Insta parce
+    que :
+      1. exiftool écrit `make=Apple` et `model=iPhone 17` dans les
+         tags EXIF/XMP — c'est ce que les fingerprinters scrutent
+         en priorité (parsing exiftool, pas parsing atom-level QT).
+      2. On garde `software`, `creationdate`, `location.ISO6709`,
+         `location.accuracy.horizontal` dans les atoms QT — fingerprint
+         "captured on a recent iPhone in Atlanta on date X".
+      3. `compatible_brands` inclut toujours `qt  `.
+
+    Si un jour TikTok pousse leur détection au parsing atom-level
+    et qu'on perd en délivrabilité, on pourra envisager de
+    re-injecter make/model conditionnellement (toggle UI "Spoof
+    agressif — bloque la lecture iOS")."""
     mp4 = MP4(filepath)
-    mp4["----:com.apple.quicktime:make"] = _ff("Apple")
-    mp4["----:com.apple.quicktime:model"] = _ff(model)
+    # NB : on n'écrit PAS make / model (cf docstring) — gardés pour
+    # référence dans les paramètres au cas où on les rétablit.
+    _ = model  # silence unused warning
     mp4["----:com.apple.quicktime:software"] = _ff(SOFTWARE_VERSION)
     mp4["----:com.apple.quicktime:creationdate"] = _ff(creation_iso)
     mp4["----:com.apple.quicktime:location.ISO6709"] = _ff(iso6709)
