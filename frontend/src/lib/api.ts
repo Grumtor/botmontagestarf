@@ -272,6 +272,11 @@ export const TextLayerDataSchema = z.object({
   placement_mode: PlacementModeSchema.default("fixed"),
   placement_zone: PlacementZoneSchema.nullable().default(null),
   placement_zones: z.array(PlacementZoneSchema).default([]),
+  // Phase 34 — Pre-wrapped lines computed by the frontend via
+  // canvas.measureText (DOM-matching metrics). The backend skips its
+  // own PIL-based wrap when this is non-empty and just draws line by
+  // line. Guarantees pixel-perfect preview = render.
+  precomputed_lines: z.array(z.string()).optional(),
 });
 export type TextLayerData = z.infer<typeof TextLayerDataSchema>;
 

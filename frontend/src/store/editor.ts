@@ -23,6 +23,8 @@ import {
   makeImageClip,
   makePlaceholderClip,
 } from "@/lib/editor-types";
+import { precomputeWrapLines } from "@/lib/text-wrap";
+import { parseTextData } from "@/lib/api";
 
 const MAX_EXTRA_TRACKS = 4; // 5 total - main track 1
 const EXTRA_CLIP_DEFAULT_DURATION = 3.0;
@@ -36,6 +38,43 @@ export type ExtraTrack = {
 const SAVE_DEBOUNCE_MS = 500;
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Recompute `data.precomputed_lines` for a text layer using the browser's
+ * canvas.measureText (DOM-matching metrics). Called from patchLayer /
+ * patchLayerData after any mutation that could affect wrap.
+ *
+ * The backend reads `data.precomputed_lines` at render time and skips
+ * its own PIL-based wrap when this is set → guarantees that the rendered
+ * output matches what the preview displays, regardless of font / size /
+ * layer width / text content.
+ *
+ * Non-text layers and SSR are passed through unchanged. If the canvas
+ * measurement fails for some reason, we leave precomputed_lines absent
+ * and the backend falls back to its own wrap (graceful degradation).
+ */
+function withPrecomputedLines(layer: Layer): Layer {
+  if (layer.type !== "text") return layer;
+  const td = parseTextData(layer.data);
+  const lines = precomputeWrapLines({
+    text: td.text,
+    font_id: td.font_id,
+    font_size_pct: td.font_size_pct,
+    max_width_pct: td.max_width_pct,
+    width_pct: layer.width_pct,
+    letter_spacing: td.letter_spacing,
+    bold: td.bold,
+    italic: td.italic,
+  });
+  if (lines === null) return layer; // SSR or canvas unavailable
+  return {
+    ...layer,
+    data: {
+      ...layer.data,
+      precomputed_lines: lines,
+    },
+  };
+}
 
 // ----- undo / redo -------------------------------------------------------
 
@@ -335,12 +374,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // Loading a template is NOT an undoable action — we mark this
     // mutation as a replay so the auto-history subscriber skips it,
     // then we manually reset past/future and the lastDocSnap baseline.
+    //
+    // Phase 34 — On force le recompute des precomputed_lines pour
+    // chaque text layer au chargement. Les templates créés avant
+    // Phase 34 n'ont pas ces lines stockées ; recomputer ici garantit
+    // que le premier render après le load utilisera les lines à jour
+    // (sinon le backend fallback sur PIL wrap → mismatch potentiel).
+    // Les templates récents ont déjà des lines correctes, mais le
+    // recompute reste sûr (idempotent).
+    const layers = parseLayers(template.layers).map((l) =>
+      withPrecomputedLines(l),
+    );
     set({
       _isReplaying: true,
       template,
       clips: parseClips(template.clips),
       extraTracks: parseExtraTracks(template.extra_tracks),
-      layers: parseLayers(template.layers),
+      layers,
       audioOverlay: parseAudioOverlay(template.audio_overlay),
       selectedClipId: null,
       selectedExtraTrackId: null,
@@ -816,7 +866,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   patchLayer: (id, patch) => {
     set((s) => ({
-      layers: s.layers.map((l) => (l.id === id ? { ...l, ...patch } : l)),
+      layers: s.layers.map((l) =>
+        l.id === id
+          ? withPrecomputedLines({ ...l, ...patch })
+          : l,
+      ),
     }));
     schedule(get);
   },
@@ -824,7 +878,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   patchLayerData: (id, patch) => {
     set((s) => ({
       layers: s.layers.map((l) =>
-        l.id === id ? { ...l, data: { ...l.data, ...patch } } : l,
+        l.id === id
+          ? withPrecomputedLines({ ...l, data: { ...l.data, ...patch } })
+          : l,
       ),
     }));
     schedule(get);

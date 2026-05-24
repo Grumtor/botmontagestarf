@@ -308,15 +308,47 @@ def render_text_layer_to_png(
 
     emoji_size = int(round(font_size * 0.95))  # tiny pad below cap height
 
-    tokens = _tokenize(text, font, emoji_size)
-
-    # Letter-spacing: bump word widths so wrap accounts for it.
-    if extra_letter_px:
-        for t in tokens:
-            if t.kind == "word":
-                t.width += extra_letter_px * max(0, len(t.value) - 1)
-
-    lines = _wrap_tokens(tokens, max_text_w)
+    # Phase 34 — Pre-wrapped lines provided by the frontend ?
+    #
+    # If `data.precomputed_lines` is a non-empty list of strings, the
+    # frontend has already computed the wrap using canvas.measureText
+    # (which uses the exact same metrics as the browser DOM that
+    # rendered the editor preview). We skip our own wrap and tokenize
+    # each pre-computed line as a single line — guarantees that the
+    # rendered output matches the preview pixel-for-pixel, regardless
+    # of font / size / max-width / text content.
+    #
+    # Fallback : when the field is absent (legacy templates) or empty
+    # (frontend couldn't measure for some reason), we wrap here with
+    # PIL metrics like before. Backwards-compatible.
+    precomputed = data.get("precomputed_lines")
+    if isinstance(precomputed, list) and any(
+        isinstance(ln, str) for ln in precomputed
+    ):
+        lines = []
+        for ln in precomputed:
+            line_text = str(ln) if isinstance(ln, str) else ""
+            line = _Line()
+            for tok in _tokenize(line_text, font, emoji_size):
+                if tok.kind == "newline":
+                    continue
+                if extra_letter_px and tok.kind == "word":
+                    tok.width += extra_letter_px * max(0, len(tok.value) - 1)
+                line.tokens.append(tok)
+                line.width += tok.width
+            # Same trailing-space trim as _wrap_tokens applies.
+            while line.tokens and line.tokens[-1].kind == "space":
+                line.width -= line.tokens[-1].width
+                line.tokens.pop()
+            lines.append(line)
+    else:
+        tokens = _tokenize(text, font, emoji_size)
+        # Letter-spacing: bump word widths so wrap accounts for it.
+        if extra_letter_px:
+            for t in tokens:
+                if t.kind == "word":
+                    t.width += extra_letter_px * max(0, len(t.value) - 1)
+        lines = _wrap_tokens(tokens, max_text_w)
 
     if not lines or all(not ln.tokens for ln in lines):
         return None
