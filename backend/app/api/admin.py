@@ -28,10 +28,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import hash_password
+from app.bin_finder import ffprobe_exe
 from app.db import get_db
 from app.db.models import RenderJob, Template, User, UserPriority, UserRole
 from app.storage import RENDERS_DIR, template_dir
 from app.users import require_admin
+
+import json
+import subprocess
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -291,3 +296,95 @@ def delete_user(
     db.delete(u)
     db.commit()
     return {"ok": True}
+
+
+# ---- debug / diagnostic ------------------------------------------------
+
+@router.get("/debug/probe/{job_id}")
+def debug_probe_job_outputs(
+    job_id: int,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+) -> dict:
+    """Run ffprobe on every output file of a render job and return the
+    full per-stream JSON.
+
+    Used to diagnose audio/video container issues that show different
+    behaviour across players (e.g. son OK desktop / muet iOS Photos
+    despite la barre de niveau qui bouge → typiquement channel_layout
+    weird, track flags exotiques, ou samples décodés mais inroutables
+    par le hardware decoder).
+
+    Returns one entry per output file with:
+      - path : absolute path on disk
+      - size_bytes
+      - format : container-level info (duration, bitrate, tags)
+      - streams : list of {codec_type, codec_name, profile, sample_rate,
+                  channels, channel_layout, bit_rate, duration,
+                  disposition (default/forced/etc.), tags...}
+      - error : if ffprobe failed
+    """
+    job = db.get(RenderJob, job_id)
+    if job is None:
+        raise HTTPException(404, "Job non trouvé")
+
+    files = list(job.output_files or [])
+    if not files:
+        return {
+            "job_id": job_id,
+            "status": job.status,
+            "message": "No output files yet",
+            "items": [],
+        }
+
+    probe = ffprobe_exe()
+    items: list[dict] = []
+    for f in files:
+        path = Path(f)
+        if not path.is_absolute():
+            path = RENDERS_DIR / path
+        entry: dict = {
+            "path": str(path),
+            "exists": path.is_file(),
+        }
+        if not path.is_file():
+            items.append(entry)
+            continue
+        try:
+            entry["size_bytes"] = path.stat().st_size
+        except OSError:
+            entry["size_bytes"] = None
+        try:
+            result = subprocess.run(
+                [
+                    probe,
+                    "-v", "error",
+                    "-show_format",
+                    "-show_streams",
+                    "-print_format", "json",
+                    str(path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            if result.returncode != 0:
+                entry["error"] = f"ffprobe rc={result.returncode}: {result.stderr[:500]}"
+            else:
+                try:
+                    entry["probe"] = json.loads(result.stdout)
+                except json.JSONDecodeError as e:
+                    entry["error"] = f"invalid JSON from ffprobe: {e}"
+        except FileNotFoundError:
+            entry["error"] = "ffprobe binary not found on server"
+        except subprocess.TimeoutExpired:
+            entry["error"] = "ffprobe timed out (>15s)"
+        items.append(entry)
+
+    return {
+        "job_id": job_id,
+        "status": job.status,
+        "count": len(items),
+        "items": items,
+    }
