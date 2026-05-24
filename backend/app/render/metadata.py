@@ -69,40 +69,19 @@ DEFAULT_COMPATIBLE = [b"mp42", b"isom", b"mp41", b"qt  "]
 
 
 def patch_ftyp_to_qt(filepath: Path) -> None:
-    """Rewrite the ftyp atom : keep `mp42` as MajorBrand (iOS-friendly),
-    add `qt  ` to compatible_brands (preserves QuickTime parser compat).
+    """No-op depuis Phase 31c.
 
-    Function name kept for backward compat with callers."""
-    with filepath.open("r+b") as f:
-        head = f.read(16)
-        if len(head) < 16 or head[4:8] != b"ftyp":
-            log.warning("ftyp atom not found at offset 0 in %s; skipping patch", filepath)
-            return
+    Le rewrite du ftyp atom (même juste pour ajouter `qt  ` aux
+    compatible_brands) participait à faire basculer iOS Photos sur
+    son codec path Apple natif → audio muet sur iPhone. Test
+    empirique : sans aucune modification du container, iOS lit
+    l'audio normalement.
 
-        atom_size = int.from_bytes(head[0:4], "big")
-        minor_version = head[12:16]
-
-        new_compat = b"".join(DEFAULT_COMPATIBLE)
-        new_payload = b"ftyp" + MP4_BRAND + minor_version + new_compat
-        new_atom_size = 4 + len(new_payload)
-
-        if atom_size >= new_atom_size:
-            # Pad to atom_size with zeros so trailing atoms keep their offsets.
-            new_atom = (
-                atom_size.to_bytes(4, "big")
-                + new_payload
-                + b"\x00" * (atom_size - new_atom_size)
-            )
-            f.seek(0)
-            f.write(new_atom)
-        else:
-            # Grow: read rest of file, shift forward.
-            f.seek(atom_size)
-            rest = f.read()
-            new_atom = new_atom_size.to_bytes(4, "big") + new_payload
-            f.seek(0)
-            f.write(new_atom + rest)
-            f.truncate(len(new_atom) + len(rest))
+    Function name + signature conservés pour ne pas casser les
+    callers existants (apply_quicktime_metadata). On peut la
+    réactiver derrière un toggle si TikTok/Insta exigent un jour
+    le `qt  ` brand au niveau container."""
+    return
 
 
 # ---- mutagen MP4 atoms ------------------------------------------------
@@ -112,44 +91,27 @@ def _ff(value: str) -> MP4FreeForm:
 
 
 def write_mp4_atoms(filepath: Path, *, model: str, creation_iso: str, iso6709: str) -> None:
-    """Write QuickTime user atoms — but SKIP `make` and `model`.
+    """No-op depuis Phase 31c.
 
-    Phase 31b — Test empirique confirmé : la combinaison
-        com.apple.quicktime:make = "Apple"
-        com.apple.quicktime:model = "iPhone 17"
-    fait basculer iOS Photos / Safari / Telegram-iOS sur leur codec
-    path "vraie vidéo iPhone hardware". Ce path s'attend à un track
-    audio encodé par le silicium Apple (codec/path Apple-spécifique).
-    Notre AAC vient de Lavc (ffmpeg) : iOS arrive à décoder les
-    samples (d'où la barre de niveau qui bouge sur le téléphone) mais
-    ne sait pas les router vers les haut-parleurs → muet total côté
-    hardware. Sur PC, le decoder software ignore cette distinction.
+    Test empirique sur iPhone (job 51, ffprobe via
+    /api/admin/debug/probe) confirme : retirer juste `make` et
+    `model` ne suffit pas — la simple présence des atoms
+    `com.apple.quicktime.{software, creationdate, location.*}`
+    suffit à faire basculer iOS Photos sur son codec path "vraie
+    vidéo iPhone hardware" → audio décodé mais non routé → muet
+    sur le téléphone (la barre de niveau bouge mais aucun son).
 
-    Workaround : on n'écrit plus `make` et `model` dans les atoms QT.
-    iOS Photos voit le container comme un MP4 standard et lit notre
-    AAC sans souci. Le spoof reste effectif côté TikTok/Insta parce
-    que :
-      1. exiftool écrit `make=Apple` et `model=iPhone 17` dans les
-         tags EXIF/XMP — c'est ce que les fingerprinters scrutent
-         en priorité (parsing exiftool, pas parsing atom-level QT).
-      2. On garde `software`, `creationdate`, `location.ISO6709`,
-         `location.accuracy.horizontal` dans les atoms QT — fingerprint
-         "captured on a recent iPhone in Atlanta on date X".
-      3. `compatible_brands` inclut toujours `qt  `.
+    Workaround : on n'écrit PLUS aucun atom QT. Le spoof iPhone
+    reste effectif via write_exiftool() (tags EXIF/XMP : GPS,
+    Country, City, dates) qui sont ce que les fingerprinters
+    TikTok/Insta scrutent en priorité.
 
-    Si un jour TikTok pousse leur détection au parsing atom-level
-    et qu'on perd en délivrabilité, on pourra envisager de
-    re-injecter make/model conditionnellement (toggle UI "Spoof
-    agressif — bloque la lecture iOS")."""
-    mp4 = MP4(filepath)
-    # NB : on n'écrit PAS make / model (cf docstring) — gardés pour
-    # référence dans les paramètres au cas où on les rétablit.
-    _ = model  # silence unused warning
-    mp4["----:com.apple.quicktime:software"] = _ff(SOFTWARE_VERSION)
-    mp4["----:com.apple.quicktime:creationdate"] = _ff(creation_iso)
-    mp4["----:com.apple.quicktime:location.ISO6709"] = _ff(iso6709)
-    mp4["----:com.apple.quicktime:location.accuracy.horizontal"] = _ff("5.000000")
-    mp4.save()
+    Function name + signature conservés pour ne pas casser
+    apply_quicktime_metadata. Si TikTok/Insta exigent un jour
+    explicitement des atoms QT, on pourra réintroduire derrière
+    un toggle UI "Spoof agressif — bloque la lecture iOS"."""
+    _ = (filepath, model, creation_iso, iso6709)  # silence unused warnings
+    return
 
 
 # ---- exiftool ---------------------------------------------------------
