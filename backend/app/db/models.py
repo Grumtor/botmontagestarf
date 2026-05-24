@@ -59,6 +59,10 @@ class User(Base):
     # Admin tops up manually via /admin/users.
     render_credits: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Phase 35 — UI language. "fr" or "en". Per-user setting, synced
+    # across devices since it lives in the DB (the user picks it once
+    # via the sidebar dropdown, then it follows them).
+    language: Mapped[str] = mapped_column(String, default="fr", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

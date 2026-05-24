@@ -47,6 +47,7 @@ class UserOut(BaseModel):
     max_templates: int | None
     render_credits: int
     is_active: bool
+    language: str
 
     @classmethod
     def from_orm(cls, u: User) -> "UserOut":
@@ -58,7 +59,12 @@ class UserOut(BaseModel):
             max_templates=u.max_templates,
             render_credits=u.render_credits,
             is_active=u.is_active,
+            language=(u.language or "fr"),
         )
+
+
+class LanguageUpdate(BaseModel):
+    language: str = Field(pattern="^(fr|en)$")
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
@@ -159,6 +165,20 @@ def me(user: User = Depends(require_user)) -> dict:
         "auth_enabled": True,
         "user": UserOut.from_orm(user).model_dump(),
     }
+
+
+@router.patch("/me/language")
+def update_language(
+    payload: LanguageUpdate,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Update the current user's UI language preference. The frontend
+    calls this when the user switches FR/EN from the sidebar dropdown.
+    Persisted in DB → follows the user across browsers / devices."""
+    user.language = payload.language
+    db.commit()
+    return {"ok": True, "language": payload.language}
 
 
 @router.get(

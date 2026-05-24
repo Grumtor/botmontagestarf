@@ -132,6 +132,18 @@ async def lifespan(app: FastAPI):
                     text("ALTER TABLE render_jobs ADD COLUMN owner_id INTEGER")
                 )
             _step("    + render_jobs.owner_id added")
+
+        # Phase 35 — UI language per user (fr / en).
+        users_cols = {c["name"] for c in inspector.get_columns("users")}
+        if "language" not in users_cols:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE users ADD COLUMN language VARCHAR "
+                        "NOT NULL DEFAULT 'fr'"
+                    )
+                )
+            _step("    + users.language added (default 'fr')")
         _step("    [OK] migrations OK")
     except Exception as e:
         _step(f"    [FAIL] migrations failed: {e}")

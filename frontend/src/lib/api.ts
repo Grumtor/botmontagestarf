@@ -78,8 +78,12 @@ export const UserMeSchema = z.object({
   max_templates: z.number().nullable(),
   render_credits: z.number(),
   is_active: z.boolean(),
+  // Phase 35 — UI language preference. May be absent for users
+  // created before the migration ; default to "fr" in that case.
+  language: z.enum(["fr", "en"]).default("fr"),
 });
 export type UserMe = z.infer<typeof UserMeSchema>;
+export type AppLang = "fr" | "en";
 
 export const Auth = {
   /** Logout : invalide le cookie côté serveur ET côté client. */
@@ -120,6 +124,20 @@ export const Auth = {
       return r.success ? r.data : null;
     } catch {
       return null;
+    }
+  },
+
+  /** Phase 35 — update the current user's UI language. Persisted in
+   *  DB, follows the user across browsers / devices. */
+  setLanguage: async (lang: AppLang): Promise<void> => {
+    const res = await fetch(`${BACKEND_DIRECT_URL}/api/auth/me/language`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ language: lang }),
+    });
+    if (!res.ok) {
+      throw new Error(`PATCH /api/auth/me/language failed: ${res.status}`);
     }
   },
 };
