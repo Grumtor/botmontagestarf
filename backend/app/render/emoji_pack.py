@@ -27,7 +27,24 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 APPLE_EMOJI_DIR_NAME = "apple_emojis"
-APPLE_EMOJI_VERSION = "15.1.2"
+# Phase 32 — bump 15.1.2 → 16.0.0.
+#
+# 15.1.2 = Unicode 15.1 (sept 2023, iOS 17.4). Tous les emojis ajoutés
+# par Unicode 16 (sept 2024, iOS 18.4+) renvoyaient un 404 sur jsdelivr
+# et le rendu affichait un tofu (□) à leur place :
+#   🫩 face with bags under eyes
+#   🪾 leafless tree
+#   🪏 shovel
+#   🫟 splatter
+#   🇨🇶 flag: Sark
+#   🪮 hair pick
+#   ...
+#
+# Le caching disk des PNG déjà téléchargés reste valide (le naming
+# `{unified}.png` est stable d'une version à l'autre). Au restart, le
+# _NEGATIVE_CACHE en mémoire est vidé donc les emojis qui avaient
+# échoué seront re-tentés contre la nouvelle version.
+APPLE_EMOJI_VERSION = "16.0.0"
 # emoji-datasource-apple ships sized PNGs at 16/20/32/64/160. 64 is plenty
 # crisp for caption-size emoji in a 1920px-tall reel.
 APPLE_EMOJI_PX = 64
