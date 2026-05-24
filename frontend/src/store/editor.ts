@@ -23,7 +23,7 @@ import {
   makeImageClip,
   makePlaceholderClip,
 } from "@/lib/editor-types";
-import { precomputeWrapLines } from "@/lib/text-wrap";
+import { ensureFontLoaded, precomputeWrapLines } from "@/lib/text-wrap";
 import { parseTextData } from "@/lib/api";
 
 const MAX_EXTRA_TRACKS = 4; // 5 total - main track 1
@@ -49,9 +49,13 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null;
  * output matches what the preview displays, regardless of font / size /
  * layer width / text content.
  *
- * Non-text layers and SSR are passed through unchanged. If the canvas
- * measurement fails for some reason, we leave precomputed_lines absent
- * and the backend falls back to its own wrap (graceful degradation).
+ * Font-loading dance : custom @font-face fonts (Montserrat Bold etc.)
+ * are downloaded async with `font-display: swap`. If we call
+ * canvas.measureText before they're loaded, the canvas silently falls
+ * back to system-ui → wrap is completely wrong (was the cause of the
+ * "ça change rien après mon fix" bug). When the font isn't ready yet,
+ * we leave precomputed_lines absent for now and kick a background load
+ * that re-patches the layer once the font is decoded.
  */
 function withPrecomputedLines(layer: Layer): Layer {
   if (layer.type !== "text") return layer;
@@ -66,7 +70,30 @@ function withPrecomputedLines(layer: Layer): Layer {
     bold: td.bold,
     italic: td.italic,
   });
-  if (lines === null) return layer; // SSR or canvas unavailable
+  if (lines === null) {
+    // Font likely not loaded yet (or SSR). Kick the font load and
+    // re-patch this layer once it resolves so the autosave eventually
+    // ships the right lines to the backend. Idempotent : if already
+    // loaded, the .then runs immediately.
+    const fontSizePx = (td.font_size_pct / 100) * 1920;
+    if (fontSizePx >= 1 && typeof document !== "undefined") {
+      const layerId = layer.id;
+      ensureFontLoaded(td.font_id, fontSizePx, td.bold, td.italic).then(() => {
+        // Use a microtask delay so we don't re-enter set() from
+        // within this same set() call.
+        queueMicrotask(() => {
+          const store = useEditorStore.getState();
+          const cur = store.layers.find((l) => l.id === layerId);
+          if (!cur || cur.type !== "text") return;
+          // patchLayerData({}) is a no-op data merge, but the
+          // wrapping withPrecomputedLines now sees the font ready
+          // and will compute proper lines this time.
+          store.patchLayerData(layerId, {});
+        });
+      });
+    }
+    return layer;
+  }
   return {
     ...layer,
     data: {

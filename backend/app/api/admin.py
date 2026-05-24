@@ -388,3 +388,52 @@ def debug_probe_job_outputs(
         "count": len(items),
         "items": items,
     }
+
+
+@router.get("/debug/template-text/{template_id}")
+def debug_template_text_layers(
+    template_id: int,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+) -> dict:
+    """Dump tous les text layers d'un template avec leur precomputed_lines
+    et les params clés (font, font_size_pct, max_width_pct, width_pct).
+
+    Permet de vérifier si le frontend envoie bien les lignes pré-wrappées
+    au backend, et ce que le backend va effectivement dessiner."""
+    tpl = db.get(Template, template_id)
+    if tpl is None:
+        raise HTTPException(404, "Template non trouvé")
+
+    out: list[dict] = []
+    layers = tpl.layers if isinstance(tpl.layers, list) else []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        if layer.get("type") != "text":
+            continue
+        data = layer.get("data") or {}
+        entry = {
+            "layer_id": layer.get("id"),
+            "text": data.get("text"),
+            "font_id": data.get("font_id"),
+            "font_size_pct": data.get("font_size_pct"),
+            "max_width_pct": data.get("max_width_pct"),
+            "width_pct": layer.get("width_pct"),
+            "height_pct": layer.get("height_pct"),
+            "bold": data.get("bold"),
+            "italic": data.get("italic"),
+            "letter_spacing": data.get("letter_spacing"),
+            "precomputed_lines": data.get("precomputed_lines"),
+            "precomputed_lines_present": isinstance(
+                data.get("precomputed_lines"), list
+            ) and len(data.get("precomputed_lines") or []) > 0,
+        }
+        out.append(entry)
+
+    return {
+        "template_id": template_id,
+        "template_name": tpl.name,
+        "text_layer_count": len(out),
+        "layers": out,
+    }

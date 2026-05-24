@@ -217,10 +217,57 @@ export type PrecomputeInput = {
 };
 
 /**
+ * True iff the requested font is already loaded into the document's
+ * font set. Critical because `font-display: swap` means our @font-face
+ * fonts download asynchronously — if we call canvas.measureText before
+ * the font is loaded, the canvas silently falls back to system-ui and
+ * the metrics are completely wrong (= the bug the user kept seeing
+ * even after we shipped the pre-wrap : the wrap was computed against
+ * a totally different font than what the DOM eventually rendered).
+ */
+export function isFontReady(
+  fontId: FontId,
+  fontSizePx: number,
+  bold: boolean,
+  italic: boolean,
+): boolean {
+  if (typeof document === "undefined" || !document.fonts) return false;
+  const spec = buildCssFont(fontFamily(fontId), fontSizePx, bold, italic);
+  try {
+    return document.fonts.check(spec);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Kick the browser to actually download + decode the requested font.
+ * Resolves once it's available for canvas.measureText. No-op if already
+ * loaded. Use this when fontsReady is false to wait for the load.
+ */
+export async function ensureFontLoaded(
+  fontId: FontId,
+  fontSizePx: number,
+  bold: boolean,
+  italic: boolean,
+): Promise<void> {
+  if (typeof document === "undefined" || !document.fonts) return;
+  const spec = buildCssFont(fontFamily(fontId), fontSizePx, bold, italic);
+  try {
+    await document.fonts.load(spec);
+  } catch {
+    // Swallow — caller will see precomputeWrapLines return null and
+    // fall back to the backend wrap.
+  }
+}
+
+/**
  * Compute the pre-wrapped lines for a text layer. Returns null if we
- * can't run (SSR, no DOM canvas) — the caller should leave
- * `precomputed_lines` empty in that case and the backend will fall
- * back to its own wrap.
+ * can't run reliably (SSR, no canvas, OR the requested font isn't
+ * loaded yet — in which case canvas.measureText would silently use
+ * the wrong font and produce a bogus wrap). The caller should leave
+ * `precomputed_lines` empty in that case and trigger ensureFontLoaded
+ * + retry once the font is available.
  */
 export function precomputeWrapLines(input: PrecomputeInput): string[] | null {
   const ctx = getCtx();
@@ -229,6 +276,10 @@ export function precomputeWrapLines(input: PrecomputeInput): string[] | null {
 
   const fontSizePx = (input.font_size_pct / 100) * RENDER_H;
   if (fontSizePx < 1) return [];
+
+  if (!isFontReady(input.font_id, fontSizePx, input.bold, input.italic)) {
+    return null;
+  }
 
   // Match backend cap: min(max_width_pct % canvas_w, layer_width_pct % canvas_w).
   const maxWidthPx = Math.max(
