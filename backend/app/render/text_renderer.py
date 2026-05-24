@@ -256,9 +256,29 @@ def render_text_layer_to_png(
     layer_h = int(h_pct / 100 * output_h)
 
     # Frontend uses `cqw` (canvas width) for max-width — same here.
+    # Cap par layer_w pour matcher le frontend (text-layer.tsx applique
+    # `min(${max_width_pct}cqw, 100%)` où le 100% = layer wrapper width).
     max_text_w = max(50.0, max_width_pct / 100 * output_w)
-    # If the layer is narrower than max_width_pct, the layer width wins.
     max_text_w = min(max_text_w, float(layer_w))
+
+    # Phase 33b — Safety margin de 2% pour absorber les diffs de metrics
+    # entre PIL (Pillow) et le browser CSS engine.
+    #
+    # Bug visé : la preview wrap après "Texteqsdqsdqsdq" (15 chars), le
+    # rendu wrap après "Texteqsdqsdqsdqs" (16 chars) → la 16e char fait
+    # déborder la ligne et le texte sort des bords de la frame
+    # (visible : le "T" initial est clipped à gauche, le "s" final est
+    # clipped à droite).
+    #
+    # Cause : PIL ne fait pas exactement le même text shaping (kerning,
+    # ligatures) que HarfBuzz utilisé par les navigateurs. La diff par
+    # mot est de l'ordre de 1-3px, ce qui cumulé sur une ligne peut
+    # faire wrapper 1 char plus tard côté backend.
+    #
+    # Fix : on réduit max_text_w de 2% côté backend pour que le wrap
+    # backend soit toujours AU MOINS aussi serré que le wrap frontend.
+    # Garantit que le rendu rentre dans ce que la preview a affiché.
+    max_text_w *= 0.98
 
     try:
         font = ImageFont.truetype(str(font_path), size=font_size)

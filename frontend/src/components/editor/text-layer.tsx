@@ -48,7 +48,13 @@ export function TextLayerContent({
     textAlign: data.align,
     lineHeight: data.line_height,
     letterSpacing: `${data.letter_spacing}em`,
-    maxWidth: `${data.max_width_pct}cqw`,
+    // Phase 33b — Le wrap doit matcher exactement ce que fait le backend
+    // (text_renderer.py), qui cap par min(max_width_pct, layer_w). Le
+    // `cqw` est relatif à la canvas root, le `100%` est relatif au
+    // parent (= le layer wrapper, qui fait width_pct% de la canvas).
+    // Avec `min(...)`, on cap par le plus petit des deux — alignement
+    // pixel-perfect avec le backend.
+    maxWidth: `min(${data.max_width_pct}cqw, 100%)`,
     margin: 0,
     padding: 0,
     whiteSpace: "pre-wrap",
