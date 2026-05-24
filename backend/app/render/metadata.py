@@ -37,14 +37,42 @@ def load_countries() -> dict:
 
 # ---- ftyp binary patch ------------------------------------------------
 
+# Phase 31 — On ne réécrit PLUS le major_brand en `qt  `.
+#
+# Bug visé : son décodé mais inaudible sur iOS Photos / iPhone (la
+# barre de niveau bouge mais aucun son ne sort des haut-parleurs).
+#
+# Cause racine : quand le container est tagué `major_brand=qt  `, iOS
+# Photos bascule sur son codec path "QuickTime natif Apple" — qui
+# attend un track audio encodé par le hardware iPhone (codec/path
+# Apple-spécifique). Notre AAC est produit par Lavc (ffmpeg) : iOS
+# arrive à décoder les samples (d'où la barre qui bouge) mais ne sait
+# pas les router vers les haut-parleurs parce que le format ne matche
+# pas le profil "QuickTime hardware Apple". Sur PC (VLC, Chrome) le
+# decoder software ignore cette distinction et lit normalement.
+#
+# Fix : on garde `mp42` (ou ce qu'avait ffmpeg) en major_brand → iOS
+# utilise son codec path MP4 standard qui lit notre AAC sans souci.
+# On ajoute `qt  ` aux compatible_brands pour préserver la "QuickTime
+# vibe" auprès des parsers qui scrutent cette liste.
+#
+# Le spoof iPhone reste 100% effectif via les atoms Apple
+# (com.apple.quicktime.{make,model,software,creationdate,location.*})
+# + les tags exiftool (GPS, country, dates), qui sont ce que TikTok /
+# Instagram regardent réellement pour le fingerprint hardware.
+
+MP4_BRAND = b"mp42"
 QT_BRAND = b"qt  "
-DEFAULT_COMPATIBLE = [b"qt  ", b"isom", b"mp41", b"mp42"]
+# Ordre : major-compatible d'abord (mp42, isom, mp41), puis qt en
+# bonus pour les parsers QuickTime stricts.
+DEFAULT_COMPATIBLE = [b"mp42", b"isom", b"mp41", b"qt  "]
 
 
 def patch_ftyp_to_qt(filepath: Path) -> None:
-    """Rewrite the ftyp atom so MajorBrand = 'qt  '. If the existing atom is
-    too small for our compatible_brands list, grow it and shift the rest of
-    the file (rare for ffmpeg-produced MP4s)."""
+    """Rewrite the ftyp atom : keep `mp42` as MajorBrand (iOS-friendly),
+    add `qt  ` to compatible_brands (preserves QuickTime parser compat).
+
+    Function name kept for backward compat with callers."""
     with filepath.open("r+b") as f:
         head = f.read(16)
         if len(head) < 16 or head[4:8] != b"ftyp":
@@ -55,7 +83,7 @@ def patch_ftyp_to_qt(filepath: Path) -> None:
         minor_version = head[12:16]
 
         new_compat = b"".join(DEFAULT_COMPATIBLE)
-        new_payload = b"ftyp" + QT_BRAND + minor_version + new_compat
+        new_payload = b"ftyp" + MP4_BRAND + minor_version + new_compat
         new_atom_size = 4 + len(new_payload)
 
         if atom_size >= new_atom_size:
