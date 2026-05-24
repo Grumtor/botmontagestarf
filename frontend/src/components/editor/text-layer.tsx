@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { Fragment, type CSSProperties } from "react";
 import { fontFamily } from "@/lib/editor-types";
 import type { TextLayerData } from "@/lib/api";
 import { parseTextWithEmojis } from "@/lib/apple-emoji";
@@ -76,7 +76,7 @@ export function TextLayerContent({
               WebkitBoxDecorationBreak: "clone",
             }}
           >
-            <RenderedText text={text} />
+            <TextBody data={data} text={text} />
           </span>
         </div>
       </div>
@@ -108,7 +108,7 @@ export function TextLayerContent({
             paintOrder: "stroke fill",
           }}
         >
-          <RenderedText text={text} />
+          <TextBody data={data} text={text} />
         </div>
       </div>
     );
@@ -117,7 +117,7 @@ export function TextLayerContent({
   return (
     <div style={containerStyle}>
       <div style={baseTextStyle}>
-        <RenderedText text={text} />
+        <TextBody data={data} text={text} />
       </div>
     </div>
   );
@@ -126,6 +126,19 @@ export function TextLayerContent({
 /**
  * Splits the input string into text + Apple emoji <img> spans.
  * Emoji images are sized at 1em so they match the surrounding font-size.
+ *
+ * Phase 34c — When `data.precomputed_lines` is present, the parent
+ * passes EACH line individually through this component and inserts
+ * explicit `<br/>` between them. That guarantees the preview wraps
+ * at the same word boundaries as the backend renderer (which also
+ * uses precomputed_lines).
+ *
+ * Why we can't just rely on CSS wrap : even with identical font /
+ * max-width / etc., a font rendered at 33px (preview) and 99px
+ * (render) may wrap at different word boundaries due to font hinting,
+ * sub-pixel positioning, and accumulated kerning differences. Forcing
+ * the preview to use the same lines as the render bypasses that
+ * entirely.
  */
 function RenderedText({ text }: { text: string }) {
   const segments = parseTextWithEmojis(text);
@@ -155,6 +168,27 @@ function RenderedText({ text }: { text: string }) {
           />
         ),
       )}
+    </>
+  );
+}
+
+/** Render the body of the text, using precomputed_lines if available so
+ *  the preview wraps at the same word boundaries as the backend. Falls
+ *  back to the raw text + native CSS wrap when no precomputed lines
+ *  exist (loading, legacy template, or font not loaded yet). */
+function TextBody({ data, text }: { data: TextLayerData; text: string }) {
+  const lines = data.precomputed_lines;
+  if (!Array.isArray(lines) || lines.length === 0) {
+    return <RenderedText text={text} />;
+  }
+  return (
+    <>
+      {lines.map((line, i) => (
+        <Fragment key={i}>
+          {i > 0 && <br />}
+          <RenderedText text={line} />
+        </Fragment>
+      ))}
     </>
   );
 }
