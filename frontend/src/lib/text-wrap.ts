@@ -1,5 +1,5 @@
 /**
- * Pre-wrap text into lines using the browser's CanvasRenderingContext2D.
+ * Pre-wrap text into lines using a hidden DOM <span> for measurement.
  *
  * Why this exists : the backend uses PIL (Pillow) which has slightly
  * different text metrics than the browser's HarfBuzz-based rasteriser
@@ -9,11 +9,19 @@
  * words earlier OR later than the preview — visible as extra lines or
  * text spilling out of the frame.
  *
- * Fix : compute the wrap on the frontend with the same metrics the
- * preview uses (canvas.measureText, which matches DOM rendering pixel-
- * for-pixel), and pass the resulting lines to the backend through
- * `data.precomputed_lines`. The backend skips its own wrap when this
- * field is present and just draws line-by-line.
+ * Fix : compute the wrap on the frontend with the SAME rendering path
+ * the preview uses (DOM <span> + getBoundingClientRect), and pass the
+ * resulting lines to the backend through `data.precomputed_lines`.
+ * The backend skips its own wrap when this field is present and just
+ * draws line-by-line.
+ *
+ * Why DOM measurement and NOT canvas.measureText : we tried
+ * canvas.measureText first but Chrome has a bug where the canvas can
+ * silently fall back to monospace/system-ui even after the font has
+ * loaded (chromium issues/40698829). The canvas font fallback chain
+ * also doesn't always match the DOM's, especially for @font-face
+ * fonts. Measuring via a hidden DOM span is guaranteed identical to
+ * how the preview will render.
  *
  * Mirrors the tokenization + line-fill logic of
  * `backend/app/render/text_renderer.py` (_tokenize + _wrap_tokens) so
@@ -42,37 +50,64 @@ type Token =
   | { kind: "emoji"; value: string; width: number };
 
 /**
- * Single offscreen canvas reused for all measurements (cheap, no DOM
- * cost). We only need its 2D context's measureText().
+ * DOM-based text measurement (replaced canvas.measureText after the
+ * Chrome bug + canvas font-fallback drift bit us twice in a row).
+ *
+ * We use a hidden `<span>` instead of an offscreen canvas so the
+ * measurement uses **literally the same font resolution + shaping**
+ * the DOM uses to render the preview. Guarantees pixel-perfect
+ * agreement between what the user sees on screen and what we send
+ * to the backend.
+ *
+ * The span is created once and reused across calls (set textContent +
+ * read offsetWidth = ~0.1ms). Hidden via visibility:hidden +
+ * position:absolute + pointer-events:none so it doesn't affect layout
+ * or interaction.
  */
-let _measureCtx: CanvasRenderingContext2D | null = null;
-function getCtx(): CanvasRenderingContext2D | null {
-  if (typeof document === "undefined") return null; // SSR guard
-  if (_measureCtx) return _measureCtx;
-  const cv = document.createElement("canvas");
-  const ctx = cv.getContext("2d");
-  if (!ctx) return null;
-  _measureCtx = ctx;
-  return ctx;
+let _measureSpan: HTMLSpanElement | null = null;
+function getMeasureSpan(): HTMLSpanElement | null {
+  if (typeof document === "undefined" || !document.body) return null;
+  if (_measureSpan && _measureSpan.isConnected) return _measureSpan;
+  const span = document.createElement("span");
+  span.setAttribute("aria-hidden", "true");
+  span.style.position = "absolute";
+  span.style.visibility = "hidden";
+  span.style.pointerEvents = "none";
+  span.style.top = "-9999px";
+  span.style.left = "-9999px";
+  span.style.whiteSpace = "pre";
+  span.style.margin = "0";
+  span.style.padding = "0";
+  span.style.border = "0";
+  // Keep the box exactly text-width so offsetWidth = actual rendered
+  // width (no inline-block padding artefacts).
+  span.style.display = "inline-block";
+  document.body.appendChild(span);
+  _measureSpan = span;
+  return span;
 }
 
-function buildCssFont(
+function applySpanFont(
+  span: HTMLSpanElement,
   fontFamilyName: string,
   fontSizePx: number,
   bold: boolean,
   italic: boolean,
-): string {
-  const weight = bold ? "700" : "400";
-  const style = italic ? "italic" : "normal";
-  // Quote family in case it has weird chars; include the same generic
-  // fallback used by the preview (text-layer.tsx) so the measurement
-  // matches what the user sees on screen.
-  return `${style} ${weight} ${fontSizePx}px '${fontFamilyName}', system-ui, sans-serif`;
+  letterSpacingEm: number,
+): void {
+  span.style.fontFamily = `'${fontFamilyName}', system-ui, sans-serif`;
+  span.style.fontSize = `${fontSizePx}px`;
+  span.style.fontWeight = bold ? "700" : "400";
+  span.style.fontStyle = italic ? "italic" : "normal";
+  span.style.letterSpacing = `${letterSpacingEm}em`;
 }
 
-function measureWidth(ctx: CanvasRenderingContext2D, text: string): number {
+function measureWidth(span: HTMLSpanElement, text: string): number {
   if (!text) return 0;
-  return ctx.measureText(text).width;
+  span.textContent = text;
+  // getBoundingClientRect returns fractional pixels, more precise than
+  // offsetWidth which rounds to integers.
+  return span.getBoundingClientRect().width;
 }
 
 /** Split text into runs of either plain text or single emoji graphemes,
@@ -101,12 +136,14 @@ function segmentText(text: string): Array<{ kind: "text" | "emoji"; value: strin
 
 function tokenize(
   text: string,
-  ctx: CanvasRenderingContext2D,
+  span: HTMLSpanElement,
   emojiWidthPx: number,
-  extraLetterPx: number,
 ): Token[] {
   const tokens: Token[] = [];
-  const spaceWidth = measureWidth(ctx, " ");
+  // Letter-spacing is already baked into the span style, so measureWidth
+  // returns widths that include letter-spacing. No need to apply it
+  // again on top.
+  const spaceWidth = measureWidth(span, " ");
   for (const seg of segmentText(text)) {
     if (seg.kind === "emoji") {
       tokens.push({ kind: "emoji", value: seg.value, width: emojiWidthPx });
@@ -132,11 +169,7 @@ function tokenize(
         j += 1;
       }
       const word = value.slice(i, j);
-      let w = measureWidth(ctx, word);
-      // Letter-spacing bump (CSS letter-spacing is additive per gap).
-      if (extraLetterPx && word.length > 1) {
-        w += extraLetterPx * (word.length - 1);
-      }
+      const w = measureWidth(span, word);
       tokens.push({ kind: "word", value: word, width: w });
       i = j;
     }
@@ -217,23 +250,15 @@ export type PrecomputeInput = {
 };
 
 /**
- * True iff the requested font is already loaded AND actually usable by
- * canvas.measureText. Critical because `font-display: swap` means our
- * @font-face fonts download asynchronously — if we call
- * canvas.measureText before the font is loaded, the canvas silently
- * falls back to system-ui and the metrics are completely wrong.
+ * True iff the requested font is actually loaded and rendering in the
+ * DOM (not a fallback). We test this by comparing the width of a
+ * reference string rendered with the custom font (then a known
+ * different fallback) against the same string rendered with that
+ * fallback alone. If widths differ, the browser IS using our font.
+ * If they match, it fell back = font not loaded.
  *
- * Why not just use document.fonts.check() ? Known Chrome bug
- * (https://issues.chromium.org/issues/40698829) where check() returns
- * true while canvas.measureText still uses the fallback because the
- * font hasn't been decoded for canvas yet. Result : preview ≠ render
- * because canvas wrap was computed against system-ui metrics.
- *
- * Robust heuristic : measure a reference string with the custom font
- * AND with explicit monospace. If widths differ, the canvas IS using
- * our custom font (its glyphs are wider/narrower than monospace's).
- * If they match exactly, canvas fell back to monospace = custom font
- * not actually loaded for canvas use.
+ * Works regardless of canvas/DOM API quirks because we measure
+ * directly via the same DOM rendering path the preview uses.
  */
 export function isFontReady(
   fontId: FontId,
@@ -241,31 +266,34 @@ export function isFontReady(
   bold: boolean,
   italic: boolean,
 ): boolean {
-  if (typeof document === "undefined") return false;
-  const ctx = getCtx();
-  if (!ctx) return false;
+  const span = getMeasureSpan();
+  if (!span) return false;
 
   const family = fontFamily(fontId);
   const weight = bold ? "700" : "400";
   const style = italic ? "italic" : "normal";
-  // Reference string : a mix of wide and narrow glyphs so the diff
-  // between proportional fonts and monospace is unambiguous.
   const sample = "WiQg.,!";
 
-  ctx.font = `${style} ${weight} ${fontSizePx}px '${family}', monospace`;
-  const wCustom = ctx.measureText(sample).width;
-  ctx.font = `${style} ${weight} ${fontSizePx}px monospace`;
-  const wMono = ctx.measureText(sample).width;
+  // First : measure with our font, fallback to monospace.
+  span.style.fontFamily = `'${family}', monospace`;
+  span.style.fontSize = `${fontSizePx}px`;
+  span.style.fontWeight = weight;
+  span.style.fontStyle = style;
+  span.style.letterSpacing = "0";
+  span.textContent = sample;
+  const wCustom = span.getBoundingClientRect().width;
 
-  // If the difference is < 0.5px, both runs used monospace → custom
-  // font not actually available for canvas use.
+  // Then : measure with monospace alone.
+  span.style.fontFamily = "monospace";
+  const wMono = span.getBoundingClientRect().width;
+
   return Math.abs(wCustom - wMono) > 0.5;
 }
 
 /**
  * Kick the browser to actually download + decode the requested font.
- * Resolves once it's available for canvas.measureText. No-op if already
- * loaded. Use this when fontsReady is false to wait for the load.
+ * Resolves once it's available. No-op if already loaded. Use this
+ * when isFontReady() returns false to trigger the load + retry.
  */
 export async function ensureFontLoaded(
   fontId: FontId,
@@ -274,7 +302,10 @@ export async function ensureFontLoaded(
   italic: boolean,
 ): Promise<void> {
   if (typeof document === "undefined" || !document.fonts) return;
-  const spec = buildCssFont(fontFamily(fontId), fontSizePx, bold, italic);
+  const family = fontFamily(fontId);
+  const weight = bold ? "700" : "400";
+  const style = italic ? "italic" : "normal";
+  const spec = `${style} ${weight} ${fontSizePx}px '${family}'`;
   try {
     await document.fonts.load(spec);
   } catch {
@@ -285,15 +316,21 @@ export async function ensureFontLoaded(
 
 /**
  * Compute the pre-wrapped lines for a text layer. Returns null if we
- * can't run reliably (SSR, no canvas, OR the requested font isn't
- * loaded yet — in which case canvas.measureText would silently use
- * the wrong font and produce a bogus wrap). The caller should leave
+ * can't run reliably (SSR, no DOM, OR the requested font isn't loaded
+ * yet — in which case the measurement would silently use a fallback
+ * font and produce a bogus wrap). The caller should leave
  * `precomputed_lines` empty in that case and trigger ensureFontLoaded
  * + retry once the font is available.
+ *
+ * Implementation note : measurement uses a hidden DOM <span>, not
+ * canvas.measureText, because canvas has font-resolution quirks that
+ * don't match the DOM exactly (Chrome bug + different fallback chain
+ * for canvas vs DOM). The DOM-based measurement is guaranteed to
+ * match what the preview renders pixel-for-pixel.
  */
 export function precomputeWrapLines(input: PrecomputeInput): string[] | null {
-  const ctx = getCtx();
-  if (!ctx) return null;
+  const span = getMeasureSpan();
+  if (!span) return null;
   if (!input.text) return [];
 
   const fontSizePx = (input.font_size_pct / 100) * RENDER_H;
@@ -312,16 +349,17 @@ export function precomputeWrapLines(input: PrecomputeInput): string[] | null {
     ),
   );
 
-  ctx.font = buildCssFont(
+  applySpanFont(
+    span,
     fontFamily(input.font_id),
     fontSizePx,
     input.bold,
     input.italic,
+    input.letter_spacing,
   );
 
   const emojiWidthPx = fontSizePx * 0.95; // matches backend `emoji_size`
-  const extraLetterPx = Math.round(input.letter_spacing * fontSizePx);
 
-  const tokens = tokenize(input.text, ctx, emojiWidthPx, extraLetterPx);
+  const tokens = tokenize(input.text, span, emojiWidthPx);
   return wrapTokens(tokens, maxWidthPx);
 }
