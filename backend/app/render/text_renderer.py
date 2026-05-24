@@ -325,6 +325,11 @@ def render_text_layer_to_png(
     if isinstance(precomputed, list) and any(
         isinstance(ln, str) for ln in precomputed
     ):
+        log.info(
+            "text_renderer: using %d precomputed_lines for layer "
+            "(font_size=%dpx max_text_w=%.0fpx)",
+            len(precomputed), font_size, max_text_w,
+        )
         lines = []
         for ln in precomputed:
             line_text = str(ln) if isinstance(ln, str) else ""
@@ -501,8 +506,27 @@ def _apply_opacity(rgba: tuple[int, int, int, int], opacity: float) -> tuple[int
 
 def cache_key_for_layer(layer: dict[str, Any], output_w: int, output_h: int) -> str:
     """Stable hash to dedupe identical text layers across renders within the
-    same batch. Caller can use this to name temp PNGs."""
+    same batch. Caller can use this to name temp PNGs.
+
+    Phase 34d — Bug critique : précédemment ce hash N'INCLUAIT PAS
+    `precomputed_lines` ni `bold` / `italic`. Conséquence : quand le
+    frontend updatait les precomputed_lines (parce que l'user change
+    le texte / drag un coin / etc.), le hash restait identique au PNG
+    déjà cached sur disque (généré avec l'ancien wrap PIL pré-Phase 34).
+    Le backend retrouvait le vieux PNG, le ré-utilisait, et le user
+    voyait toujours le même rendu désuet — peu importe qu'on ait
+    bien envoyé les nouvelles precomputed_lines au backend.
+
+    Fix : on ajoute toutes les clés qui influencent la sortie PNG.
+    Les vieux PNGs cached deviennent obsolètes (différent hash) et le
+    backend re-render avec la version à jour.
+    """
     data = layer.get("data") or {}
+    precomputed = data.get("precomputed_lines")
+    # tuple-ify la list pour être hashable + déterministe.
+    precomputed_key = (
+        tuple(precomputed) if isinstance(precomputed, list) else None
+    )
     keys = (
         layer.get("type"),
         data.get("text"),
@@ -518,6 +542,10 @@ def cache_key_for_layer(layer: dict[str, Any], output_w: int, output_h: int) -> 
         data.get("max_width_pct"),
         data.get("line_height"),
         data.get("letter_spacing"),
+        data.get("opacity"),
+        data.get("bold"),
+        data.get("italic"),
+        precomputed_key,
         layer.get("x_pct"),
         layer.get("y_pct"),
         layer.get("width_pct"),
