@@ -33,6 +33,7 @@ import {
   type TemplateLanguage,
 } from "@/lib/api";
 import { notifyUserRefresh, useCurrentUser } from "@/hooks/use-current-user";
+import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 // ===== types =========================================================
@@ -133,6 +134,7 @@ function getPlaceholders(t: Template): PlaceholderClip[] {
 
 export default function RenderWizardPage() {
   const router = useRouter();
+  const t = useT();
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
   // Step 1 — uploads
@@ -367,7 +369,7 @@ export default function RenderWizardPage() {
     try {
       const assignments = buildAssignments();
       if (assignments.length === 0) {
-        throw new Error("Rien à rendre — vérifie les sélections.");
+        throw new Error(t("render.dialog.error.nothing"));
       }
       const job = await Render.batch(
         jobName,
@@ -420,9 +422,9 @@ export default function RenderWizardPage() {
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Nouveau render</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("render.wizard.title")}</h1>
         <p className="text-sm text-muted-foreground">
-          Drop tes vidéos, choisis tes templates, lance le batch.
+          {t("render.wizard.subtitle")}
         </p>
       </div>
 
@@ -501,7 +503,7 @@ export default function RenderWizardPage() {
           disabled={submitting}
         >
           <ArrowLeft className="h-4 w-4" />
-          {step === 1 ? "Annuler" : "Retour"}
+          {step === 1 ? t("common.cancel") : t("common.back")}
         </Button>
 
         {step < 3 ? (
@@ -509,16 +511,24 @@ export default function RenderWizardPage() {
             onClick={() => setStep((step + 1) as 1 | 2 | 3)}
             disabled={!canGoNext}
           >
-            Suivant
+            {t("common.next")}
             <ArrowRight className="h-4 w-4" />
           </Button>
         ) : (
           <div className="flex flex-col items-end gap-1">
             {insufficientCredits && me && (
               <p className="text-[11px] text-destructive">
-                ⚠ {creditsShortBy} crédit{creditsShortBy > 1 ? "s" : ""}{" "}
-                manquant{creditsShortBy > 1 ? "s" : ""} ({me.render_credits}{" "}
-                dispo, {reelCount} demandés). Demande à l&apos;admin.
+                {creditsShortBy > 1
+                  ? t("render.wizard.credits.warning_plural", {
+                      n: creditsShortBy,
+                      avail: me.render_credits,
+                      requested: reelCount,
+                    })
+                  : t("render.wizard.credits.warning", {
+                      n: creditsShortBy,
+                      avail: me.render_credits,
+                      requested: reelCount,
+                    })}
               </p>
             )}
             <Button
@@ -532,8 +542,10 @@ export default function RenderWizardPage() {
             >
               <Rocket className="h-4 w-4" />
               {submitting
-                ? "Envoi…"
-                : `Lancer ${reelCount} reel${reelCount > 1 ? "s" : ""}`}
+                ? t("common.sending")
+                : reelCount > 1
+                  ? t("render.wizard.launch_plural", { n: reelCount })
+                  : t("render.wizard.launch", { n: reelCount })}
             </Button>
           </div>
         )}
@@ -545,10 +557,11 @@ export default function RenderWizardPage() {
 // ===== stepper =======================================================
 
 function Stepper({ step }: { step: 1 | 2 | 3 }) {
+  const t = useT();
   const items: { n: 1 | 2 | 3; label: string }[] = [
-    { n: 1, label: "Upload" },
-    { n: 2, label: "Templates" },
-    { n: 3, label: "Confirmation" },
+    { n: 1, label: t("render.wizard.step.upload") },
+    { n: 2, label: t("render.wizard.step.templates") },
+    { n: 3, label: t("render.wizard.step.confirm") },
   ];
   return (
     <div className="flex items-center gap-3">
@@ -601,16 +614,16 @@ function Step1Upload({
   onFiles: (files: File[]) => void;
   onRemove: (id: string) => void;
 }) {
+  const t = useT();
   const [drag, setDrag] = useState(false);
   const ready = uploads.filter((u) => u.token).length;
 
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">Uploade tes vidéos</h2>
+        <h2 className="text-lg font-semibold">{t("render.wizard.upload.title")}</h2>
         <p className="text-sm text-muted-foreground">
-          Drop autant de vidéos que tu veux (.mp4 / .mov) — qualité d&apos;origine
-          conservée, pas de réencodage côté navigateur.
+          {t("render.wizard.upload.desc")}
         </p>
       </div>
 
@@ -633,11 +646,11 @@ function Step1Upload({
       >
         <Upload className="h-8 w-8 text-muted-foreground" />
         <div className="text-sm">
-          Drop tes vidéos ici ou{" "}
-          <span className="text-primary underline">parcours</span>
+          {t("render.wizard.upload.drop")}{" "}
+          <span className="text-primary underline">{t("render.wizard.upload.browse")}</span>
         </div>
         <div className="text-xs text-muted-foreground">
-          MP4 / MOV — multi-fichiers OK
+          {t("render.wizard.upload.formats")}
         </div>
         <input
           id="wizard-upload"
@@ -656,8 +669,9 @@ function Step1Upload({
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>
-              {ready}/{uploads.length} vidéo{uploads.length > 1 ? "s" : ""} prêt
-              {ready > 1 ? "es" : "e"}
+              {uploads.length > 1
+                ? t("render.wizard.upload.ready_plural", { ready, total: uploads.length })
+                : t("render.wizard.upload.ready", { ready, total: uploads.length })}
             </span>
           </div>
           <div className="space-y-1.5">
@@ -675,7 +689,7 @@ function Step1Upload({
                 {u.error ? (
                   <span className="text-xs text-destructive">{u.error}</span>
                 ) : u.token ? (
-                  <span className="text-xs text-emerald-400">✓ prêt</span>
+                  <span className="text-xs text-emerald-400">{t("render.wizard.upload.video_ready")}</span>
                 ) : (
                   <Progress value={u.progress} className="w-32" />
                 )}
@@ -683,7 +697,7 @@ function Step1Upload({
                   type="button"
                   onClick={() => onRemove(u.id)}
                   className="text-muted-foreground hover:text-destructive"
-                  aria-label="Retirer"
+                  aria-label={t("common.remove")}
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -729,17 +743,15 @@ function Step2Templates({
     React.SetStateAction<Record<string, number[]>>
   >;
 }) {
+  const t = useT();
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-lg font-semibold">Choisis tes templates</h2>
+        <h2 className="text-lg font-semibold">{t("render.wizard.tpl.title")}</h2>
         <p className="text-sm text-muted-foreground">
-          {mode === "all" &&
-            "Chaque vidéo sera rendue avec chacun des templates sélectionnés."}
-          {mode === "random" &&
-            "Chaque vidéo sera assignée aléatoirement à un des templates sélectionnés."}
-          {mode === "per_video" &&
-            "Choisis un ou plusieurs templates par vidéo. 1 reel par paire (vidéo × template)."}
+          {mode === "all" && t("render.wizard.tpl.desc.all")}
+          {mode === "random" && t("render.wizard.tpl.desc.random")}
+          {mode === "per_video" && t("render.wizard.tpl.desc.per_video")}
         </p>
       </div>
 
@@ -749,22 +761,22 @@ function Step2Templates({
           active={mode === "all"}
           onClick={() => setMode("all")}
           icon={<Layers className="h-4 w-4" />}
-          title="Toutes les templates"
-          subtitle="N vidéos × M templates"
+          title={t("render.wizard.mode.all.title")}
+          subtitle={t("render.wizard.mode.all.subtitle")}
         />
         <ModeCard
           active={mode === "random"}
           onClick={() => setMode("random")}
           icon={<Shuffle className="h-4 w-4" />}
-          title="Random Mix"
-          subtitle="Chaque vidéo → 1 template aléatoire"
+          title={t("render.wizard.mode.random.title")}
+          subtitle={t("render.wizard.mode.random.subtitle")}
         />
         <ModeCard
           active={mode === "per_video"}
           onClick={() => setMode("per_video")}
           icon={<ListChecks className="h-4 w-4" />}
-          title="Per-video"
-          subtitle="N templates par vidéo (manuel)"
+          title={t("render.wizard.mode.per_video.title")}
+          subtitle={t("render.wizard.mode.per_video.subtitle")}
         />
       </div>
 
@@ -772,7 +784,7 @@ function Step2Templates({
       {mode !== "per_video" && (
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground">Langue :</span>
+            <span className="text-muted-foreground">{t("render.wizard.language")}</span>
             {(["ALL", "FR", "US"] as const).map((l) => (
               <button
                 key={l}
@@ -785,34 +797,36 @@ function Step2Templates({
                     : "border-border hover:bg-accent/50",
                 )}
               >
-                {l === "ALL" ? "Toutes" : l === "FR" ? "🇫🇷 FR" : "🇺🇸 US"}
+                {l === "ALL" ? t("common.all") : l === "FR" ? "🇫🇷 FR" : "🇺🇸 US"}
               </button>
             ))}
           </div>
           <div className="ml-auto flex items-center gap-2 text-xs">
             <span className="text-muted-foreground">
-              {selectedIds.size} sélectionné{selectedIds.size > 1 ? "s" : ""}
+              {selectedIds.size > 1
+                ? t("render.wizard.selected_plural", { n: selectedIds.size })
+                : t("render.wizard.selected", { n: selectedIds.size })}
             </span>
             <button
               type="button"
               onClick={onSelectAll}
               className="rounded-md border border-border px-2 py-1 transition hover:bg-accent/50"
             >
-              Tout sélectionner
+              {t("render.wizard.select_all")}
             </button>
             <button
               type="button"
               onClick={onClear}
               className="rounded-md border border-border px-2 py-1 transition hover:bg-accent/50"
             >
-              Vider
+              {t("render.wizard.clear")}
             </button>
           </div>
         </div>
       )}
 
       {!allTemplatesLoaded ? (
-        <p className="text-sm text-muted-foreground">Chargement…</p>
+        <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
       ) : mode === "per_video" ? (
         <PerVideoAssign
           videos={videos}
@@ -822,22 +836,21 @@ function Step2Templates({
         />
       ) : templates.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Aucun template avec placeholder pour ce filtre. Crée un template avec
-          au moins 1 placeholder pour batch-render.
+          {t("render.wizard.no_templates")}
         </p>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-          {templates.map((t) => {
-            const selected = selectedIds.has(t.id);
-            const placeholderCount = t.clips.reduce<number>((acc, c) => {
+          {templates.map((tpl) => {
+            const selected = selectedIds.has(tpl.id);
+            const placeholderCount = tpl.clips.reduce<number>((acc, c) => {
               const r = ClipSchema.safeParse(c);
               return acc + (r.success && r.data.type === "placeholder" ? 1 : 0);
             }, 0);
             return (
               <button
-                key={t.id}
+                key={tpl.id}
                 type="button"
-                onClick={() => onToggle(t.id)}
+                onClick={() => onToggle(tpl.id)}
                 className={cn(
                   "group relative flex flex-col overflow-hidden rounded-lg border-2 bg-card text-left transition",
                   selected
@@ -846,7 +859,7 @@ function Step2Templates({
                 )}
               >
                 <div className="relative aspect-[9/16] w-full bg-black">
-                  <WizardTemplatePreview template={t} />
+                  <WizardTemplatePreview template={tpl} />
                   {selected && (
                     <div className="absolute right-1.5 top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
                       <Check className="h-3 w-3" />
@@ -854,11 +867,13 @@ function Step2Templates({
                   )}
                 </div>
                 <div className="p-2 text-xs">
-                  <div className="truncate font-medium">{t.name}</div>
+                  <div className="truncate font-medium">{tpl.name}</div>
                   <div className="text-muted-foreground">
-                    {t.language === "FR" ? "🇫🇷 FR" : "🇺🇸 US"}
+                    {tpl.language === "FR" ? "🇫🇷 FR" : "🇺🇸 US"}
                     {" · "}
-                    {placeholderCount} trou{placeholderCount > 1 ? "s" : ""}
+                    {placeholderCount > 1
+                      ? t("render.wizard.holes_plural", { n: placeholderCount })
+                      : t("render.wizard.holes", { n: placeholderCount })}
                   </div>
                 </div>
               </button>
@@ -881,6 +896,7 @@ function Step2Templates({
  * frame, donc c'est léger même avec 20 templates en grille.
  */
 function WizardTemplatePreview({ template }: { template: Template }) {
+  const t = useT();
   const [coverFailed, setCoverFailed] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const [thumbFailed, setThumbFailed] = useState(false);
@@ -922,7 +938,7 @@ function WizardTemplatePreview({ template }: { template: Template }) {
   }
   return (
     <div className="absolute inset-0 flex items-center justify-center text-[10px] text-muted-foreground">
-      Pas d&apos;aperçu
+      {t("render.wizard.no_preview")}
     </div>
   );
 }
@@ -973,17 +989,18 @@ function PerVideoAssign({
     React.SetStateAction<Record<string, number[]>>
   >;
 }) {
+  const t = useT();
   if (videos.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        Aucune vidéo prête. Reviens à l&apos;étape 1.
+        {t("render.wizard.no_videos")}
       </p>
     );
   }
   if (allTemplates.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        Aucun template avec placeholder.
+        {t("render.wizard.no_placeholder_templates")}
       </p>
     );
   }
@@ -1020,9 +1037,10 @@ function PerVideoAssign({
               <div className="flex-1 truncate">
                 <div className="truncate font-medium">{v.name}</div>
                 <div className="text-xs text-muted-foreground">
-                  {formatBytes(v.size)} · {picked.length} template
-                  {picked.length > 1 ? "s" : ""} sélectionné
-                  {picked.length > 1 ? "s" : ""}
+                  {formatBytes(v.size)} ·{" "}
+                  {picked.length > 1
+                    ? t("render.wizard.per_video.summary_plural", { n: picked.length })
+                    : t("render.wizard.per_video.summary", { n: picked.length })}
                 </div>
               </div>
               <div className="flex items-center gap-2 text-xs">
@@ -1031,7 +1049,7 @@ function PerVideoAssign({
                   onClick={() => setAll(v.id)}
                   className="rounded-md border border-border px-2 py-1 transition hover:bg-accent/50"
                 >
-                  Tout
+                  {t("render.wizard.per_video.all")}
                 </button>
                 <button
                   type="button"
@@ -1039,18 +1057,18 @@ function PerVideoAssign({
                   disabled={picked.length === 0}
                   className="rounded-md border border-border px-2 py-1 transition hover:bg-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Aucun
+                  {t("render.wizard.per_video.none")}
                 </button>
               </div>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {allTemplates.map((t) => {
-                const on = picked.includes(t.id);
+              {allTemplates.map((tpl) => {
+                const on = picked.includes(tpl.id);
                 return (
                   <button
-                    key={t.id}
+                    key={tpl.id}
                     type="button"
-                    onClick={() => toggle(v.id, t.id)}
+                    onClick={() => toggle(v.id, tpl.id)}
                     className={cn(
                       "rounded-md border px-2 py-1 text-xs transition",
                       on
@@ -1058,9 +1076,9 @@ function PerVideoAssign({
                         : "border-border bg-background/60 hover:border-ring",
                     )}
                   >
-                    {t.name}{" "}
+                    {tpl.name}{" "}
                     <span className="text-[10px] text-muted-foreground">
-                      ({t.language})
+                      ({tpl.language})
                     </span>
                   </button>
                 );
@@ -1132,25 +1150,25 @@ function Step3Confirm({
   overLimit: boolean;
   error: string | null;
 }) {
+  const t = useT();
   const modeLabel =
     mode === "all"
-      ? "Toutes les templates"
+      ? t("render.wizard.mode.all.title")
       : mode === "random"
-        ? "Random Mix"
-        : "Per-video";
+        ? t("render.wizard.mode.random.title")
+        : t("render.wizard.mode.per_video.title");
 
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-lg font-semibold">Confirme et lance</h2>
+        <h2 className="text-lg font-semibold">{t("render.wizard.confirm.title")}</h2>
         <p className="text-sm text-muted-foreground">
-          Dernière étape — donne un nom au batch et active le spoofing si tu veux
-          que les outputs passent pour des captures iPhone.
+          {t("render.wizard.confirm.desc")}
         </p>
       </div>
 
       <label className="flex flex-col gap-1.5 text-sm">
-        <span>Nom du batch</span>
+        <span>{t("render.wizard.batch_name")}</span>
         <Input value={jobName} onChange={(e) => setJobName(e.target.value)} />
       </label>
 
@@ -1165,7 +1183,7 @@ function Step3Confirm({
               : "border-border hover:bg-accent/50",
           )}
         >
-          <span>Spoofer les métadonnées (iPhone)</span>
+          <span>{t("render.wizard.spoof_toggle")}</span>
           <OnOffBadge enabled={spoofEnabled} />
         </button>
 
@@ -1173,7 +1191,7 @@ function Step3Confirm({
           <div className="space-y-3 rounded-md border border-border bg-card p-3">
             {/* Modèle iPhone — défaut, "Changer" pour swap */}
             <div className="space-y-1.5">
-              <div className="text-xs text-muted-foreground">Profil camera</div>
+              <div className="text-xs text-muted-foreground">{t("render.spoof.camera_profile")}</div>
               <div className="flex items-center gap-2">
                 <span className="rounded-md border border-border bg-background px-2.5 py-1 text-[11px]">
                   📱 {model}
@@ -1183,7 +1201,7 @@ function Step3Confirm({
                   onClick={() => setShowModelPicker(!showModelPicker)}
                   className="text-[11px] text-muted-foreground underline transition hover:text-foreground"
                 >
-                  {showModelPicker ? "Replier" : "Changer"}
+                  {showModelPicker ? t("common.collapse") : t("common.change")}
                 </button>
               </div>
               {showModelPicker && (
@@ -1212,13 +1230,13 @@ function Step3Confirm({
 
             <div className="grid grid-cols-2 gap-3">
               <SelectField
-                label="Pays"
+                label={t("render.spoof.country")}
                 value={country}
                 options={COUNTRIES}
                 onChange={setCountry}
               />
               <SelectField
-                label="Langue"
+                label={t("render.spoof.language")}
                 value={language}
                 options={LANGUAGES.map((l) => ({ value: l, label: l }))}
                 onChange={setLanguage}
@@ -1227,7 +1245,7 @@ function Step3Confirm({
 
             <label className="flex flex-col gap-1 text-xs">
               <span className="text-muted-foreground">
-                Date dans les {dateWindow} derniers jours
+                {t("render.spoof.date_window", { n: dateWindow })}
               </span>
               <input
                 type="range"
@@ -1252,10 +1270,10 @@ function Step3Confirm({
           {mode === "random" ? (
             <label className="flex flex-col gap-1 text-xs">
               <span className="text-muted-foreground">
-                Tirages random : <strong>{randomPasses}</strong>
+                {t("render.wizard.random.label")} <strong>{randomPasses}</strong>
                 {randomPasses > 1 && (
                   <span className="ml-1 text-[10px] text-primary">
-                    → {reelCount} reels (mappings différents)
+                    {t("render.wizard.random.preview", { n: reelCount })}
                   </span>
                 )}
               </span>
@@ -1271,18 +1289,19 @@ function Step3Confirm({
                 className="w-full accent-primary"
               />
               <span className="text-[10px] text-muted-foreground">
-                Chaque tirage = nouveau shuffle vidéo↔template. Sortie en{" "}
-                <code>Tirage N/</code> dans le ZIP. Max = nb templates
-                sélectionnés ({templateCount}).
+                {t("render.wizard.random.hint", {
+                  tag: "Tirage N/",
+                  n: templateCount,
+                })}
               </span>
             </label>
           ) : (
             <label className="flex flex-col gap-1 text-xs">
               <span className="text-muted-foreground">
-                Nombre de générations : <strong>{generations}</strong>
+                {t("render.wizard.generations.label")} <strong>{generations}</strong>
                 {generations > 1 && (
                   <span className="ml-1 text-[10px] text-primary">
-                    → {reelCount} reels au total
+                    {t("render.wizard.generations.preview", { n: reelCount })}
                   </span>
                 )}
               </span>
@@ -1296,8 +1315,17 @@ function Step3Confirm({
                 className="w-full accent-primary"
               />
               <span className="text-[10px] text-muted-foreground">
-                {baseReelCount} base × {generations} = {reelCount} reel
-                {reelCount > 1 ? "s" : ""}, chacun avec EXIF différentes.
+                {reelCount > 1
+                  ? t("render.wizard.generations.hint_plural", {
+                      base: baseReelCount,
+                      gen: generations,
+                      total: reelCount,
+                    })
+                  : t("render.wizard.generations.hint", {
+                      base: baseReelCount,
+                      gen: generations,
+                      total: reelCount,
+                    })}
               </span>
             </label>
           )}
@@ -1310,15 +1338,15 @@ function Step3Confirm({
                 ? "border-primary bg-accent"
                 : "border-border bg-background hover:border-ring",
             )}
-            title="Renomme les MP4 en IMG_xxxx.MOV (style iPhone)"
+            title={t("render.wizard.naming.title_hint")}
           >
             <span className="font-medium">
-              {iphoneNaming ? "📱 Naming Apple iPhone" : "Naming par défaut"}
+              {iphoneNaming ? t("render.wizard.naming.iphone_title") : t("render.wizard.naming.default_title")}
             </span>
             <span className="text-[10px] text-muted-foreground">
               {iphoneNaming
-                ? "IMG_xxxx.MOV, compteur continu"
-                : "Garde {nom_template}_{i}.mp4"}
+                ? t("render.wizard.naming.iphone.subtitle")
+                : t("render.wizard.naming.default.subtitle", { tmpl: "{nom_template}_{i}.mp4" })}
             </span>
           </button>
         </div>
@@ -1326,26 +1354,34 @@ function Step3Confirm({
       </div>
 
       <div className="rounded-md border border-border bg-card p-4 text-sm">
-        <div className="mb-2 font-medium">Récap</div>
+        <div className="mb-2 font-medium">{t("render.wizard.recap")}</div>
         <ul className="space-y-1 text-muted-foreground">
-          <li>• {videoCount} vidéo{videoCount > 1 ? "s" : ""} uploadée{videoCount > 1 ? "s" : ""}</li>
+          <li>
+            •{" "}
+            {videoCount > 1
+              ? t("render.wizard.recap.videos_plural", { n: videoCount })
+              : t("render.wizard.recap.videos", { n: videoCount })}
+          </li>
           {mode !== "per_video" && (
             <li>
-              • {templateCount} template{templateCount > 1 ? "s" : ""} sélectionné
-              {templateCount > 1 ? "s" : ""}
+              •{" "}
+              {templateCount > 1
+                ? t("render.wizard.recap.templates_plural", { n: templateCount })
+                : t("render.wizard.recap.templates", { n: templateCount })}
             </li>
           )}
-          <li>• Mode : {modeLabel}</li>
+          <li>• {t("render.wizard.recap.mode", { mode: modeLabel })}</li>
           <li>
             •{" "}
             <span className="font-semibold text-foreground">
-              {reelCount} reel{reelCount > 1 ? "s" : ""}
-            </span>{" "}
-            seront générés
+              {reelCount > 1
+                ? t("render.wizard.recap.reels_plural", { n: reelCount })
+                : t("render.wizard.recap.reels", { n: reelCount })}
+            </span>
           </li>
           {spoofEnabled && (
             <li>
-              • Spoofing : {model} / {country} / {language}
+              • {t("render.wizard.recap.spoof", { model, country, language })}
             </li>
           )}
         </ul>
@@ -1353,8 +1389,7 @@ function Step3Confirm({
 
       {overLimit && (
         <p className="text-sm text-destructive">
-          Maximum 500 reels par batch — réduis le nombre de vidéos, de
-          templates ou de générations (ou lance en plusieurs batchs).
+          {t("render.wizard.overlimit")}
         </p>
       )}
       {error && <p className="text-sm text-destructive">{error}</p>}

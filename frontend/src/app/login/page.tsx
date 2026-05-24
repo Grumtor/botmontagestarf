@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+import { useT } from "@/lib/i18n";
+
 // Disable static prerendering — this page uses useSearchParams which
 // requires the browser env. force-dynamic makes Next.js render it on
 // demand, so no prerender-time error about Suspense.
@@ -25,6 +27,7 @@ function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const next = params.get("next") || "/";
+  const t = useT();
 
   const inputRef = useRef<HTMLInputElement>(null);
   const [username, setUsername] = useState("");
@@ -62,16 +65,16 @@ function LoginForm() {
       });
       if (!res.ok) {
         if (res.status === 429) {
-          setError("Trop de tentatives. Attends quelques minutes.");
+          setError(t("login.error.rate_limit_short"));
         } else {
-          setError("Identifiants invalides");
+          setError(t("login.error.invalid"));
         }
         setSubmitting(false);
         return;
       }
       window.location.href = next.startsWith("/") ? next : "/";
     } catch (err) {
-      setError("Erreur réseau");
+      setError(t("common.network_error"));
       setSubmitting(false);
     }
   }
@@ -84,9 +87,9 @@ function LoginForm() {
         rel="noopener noreferrer"
         className="text-center text-xs text-zinc-500 transition hover:text-zinc-300"
       >
-        Contacter{" "}
+        {t("login.contact")}{" "}
         <span className="font-mono underline">https://t.me/Grumtor</span>
-        {" "}pour plus d&apos;information
+        {" "}{t("login.contact.suffix")}
       </a>
 
       <form onSubmit={onSubmit} className="flex w-full flex-col gap-2">
@@ -96,10 +99,10 @@ function LoginForm() {
           autoComplete="username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          placeholder="username"
+          placeholder={t("login.username.placeholder")}
           disabled={submitting}
           className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-4 py-3 text-center text-sm text-zinc-100 placeholder-zinc-600 outline-none transition focus:border-zinc-600 disabled:opacity-50"
-          aria-label="Nom d'utilisateur"
+          aria-label={t("login.username")}
         />
         <input
           type="password"
@@ -109,14 +112,14 @@ function LoginForm() {
           placeholder="••••••••"
           disabled={submitting}
           className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-4 py-3 text-center text-sm text-zinc-100 placeholder-zinc-600 outline-none transition focus:border-zinc-600 disabled:opacity-50"
-          aria-label="Mot de passe"
+          aria-label={t("login.password")}
         />
         <button
           type="submit"
           disabled={submitting || !username || !password}
           className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-900 py-3 text-sm text-zinc-300 transition hover:border-zinc-600 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {submitting ? "…" : "Entrer"}
+          {submitting ? "…" : t("login.enter")}
         </button>
       </form>
 

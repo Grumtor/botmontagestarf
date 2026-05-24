@@ -9,6 +9,7 @@ import { fr as frLocale } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Jobs, type JobStatus, type JobSummary } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const STATUS_BADGE: Record<JobStatus, string> = {
@@ -19,6 +20,7 @@ const STATUS_BADGE: Record<JobStatus, string> = {
 };
 
 export default function JobsPage() {
+  const t = useT();
   const [items, setItems] = useState<JobSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -60,19 +62,19 @@ export default function JobsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Jobs</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("jobs.page_title")}</h1>
         <p className="text-sm text-muted-foreground">
-          Auto-refresh adaptatif : 3s tant qu&apos;un job tourne, 15s sinon.
+          {t("jobs.subtitle")}
         </p>
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       {loading ? (
-        <p className="text-sm text-muted-foreground">Chargement…</p>
+        <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
       ) : items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Aucun job — lance un batch depuis « New render ».
+          {t("jobs.empty_short")}
         </p>
       ) : (
         <div className="space-y-2">
@@ -96,7 +98,7 @@ export default function JobsPage() {
                       STATUS_BADGE[j.status],
                     )}
                   >
-                    {j.status}
+                    {t(`jobs.status.${j.status}`)}
                   </span>
                 </div>
                 <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
@@ -107,7 +109,9 @@ export default function JobsPage() {
                     })}
                   </span>
                   <span>
-                    {j.output_count} fichier{j.output_count > 1 ? "s" : ""}
+                    {j.output_count > 1
+                      ? t("jobs.files_count_plural", { n: j.output_count })
+                      : t("jobs.files_count", { n: j.output_count })}
                   </span>
                 </div>
                 {(j.status === "running" || j.status === "queued") && (
@@ -119,12 +123,12 @@ export default function JobsPage() {
                 <Button asChild variant="outline" size="sm">
                   <a href={`/api/files/render/${j.id}`} download>
                     <Download className="h-4 w-4" />
-                    ZIP
+                    {t("jobs.zip")}
                   </a>
                 </Button>
               )}
               <Button asChild variant="ghost" size="sm">
-                <Link href={`/jobs/${j.id}`}>Détails →</Link>
+                <Link href={`/jobs/${j.id}`}>{t("jobs.details")}</Link>
               </Button>
             </div>
           ))}

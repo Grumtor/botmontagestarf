@@ -34,15 +34,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type RoleOpt = "admin" | "user";
 type PrioOpt = "high" | "normal" | "low";
 
-const PRIO_LABEL: Record<PrioOpt, string> = {
-  high: "Haute",
-  normal: "Normale",
-  low: "Basse",
+const PRIO_KEY: Record<PrioOpt, string> = {
+  high: "admin.users.priority.high",
+  normal: "admin.users.priority.normal",
+  low: "admin.users.priority.low",
 };
 const PRIO_COLOR: Record<PrioOpt, string> = {
   high: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
@@ -53,6 +54,7 @@ const PRIO_COLOR: Record<PrioOpt, string> = {
 export default function AdminUsersPage() {
   const me = useCurrentUser();
   const { toast } = useToast();
+  const t = useT();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,7 +91,7 @@ export default function AdminUsersPage() {
   if (me && me.role !== "admin") {
     return (
       <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-6 text-sm text-destructive">
-        Cette page est réservée à l&apos;administrateur.
+        {t("admin.page.forbidden")}
       </div>
     );
   }
@@ -100,16 +102,15 @@ export default function AdminUsersPage() {
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
             <ShieldCheck className="h-6 w-6 text-amber-300" />
-            Administration des comptes
+            {t("admin.page.title")}
           </h1>
           <p className="text-sm text-muted-foreground">
-            Crée et gère les comptes utilisateurs. Tu attribues les crédits
-            et les limites manuellement.
+            {t("admin.page.subtitle")}
           </p>
         </div>
         <Button onClick={() => setCreateOpen(true)}>
           <PlusCircle className="h-4 w-4" />
-          Nouvel utilisateur
+          {t("admin.users.new")}
         </Button>
       </div>
 
@@ -123,13 +124,13 @@ export default function AdminUsersPage() {
         <table className="w-full text-sm">
           <thead className="bg-background/40 text-left text-[11px] uppercase tracking-wider text-muted-foreground">
             <tr>
-              <th className="px-3 py-2">Username</th>
-              <th className="px-3 py-2">Rôle</th>
-              <th className="px-3 py-2">Priorité</th>
-              <th className="px-3 py-2 text-right">Templates</th>
-              <th className="px-3 py-2 text-right">Crédits</th>
-              <th className="px-3 py-2 text-center">Statut</th>
-              <th className="px-3 py-2 text-right">Actions</th>
+              <th className="px-3 py-2">{t("admin.col.username")}</th>
+              <th className="px-3 py-2">{t("admin.col.role")}</th>
+              <th className="px-3 py-2">{t("admin.col.priority")}</th>
+              <th className="px-3 py-2 text-right">{t("admin.col.templates")}</th>
+              <th className="px-3 py-2 text-right">{t("admin.col.credits")}</th>
+              <th className="px-3 py-2 text-center">{t("admin.col.status")}</th>
+              <th className="px-3 py-2 text-right">{t("admin.col.actions")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -148,7 +149,7 @@ export default function AdminUsersPage() {
                     {u.username}
                     {isMe && (
                       <span className="ml-2 rounded bg-amber-500/15 px-1 py-0.5 text-[10px] text-amber-300">
-                        toi
+                        {t("admin.page.you_badge")}
                       </span>
                     )}
                   </td>
@@ -171,7 +172,7 @@ export default function AdminUsersPage() {
                         PRIO_COLOR[u.priority],
                       )}
                     >
-                      {PRIO_LABEL[u.priority]}
+                      {t(PRIO_KEY[u.priority])}
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right font-mono text-xs">
@@ -195,11 +196,11 @@ export default function AdminUsersPage() {
                   <td className="px-3 py-2 text-center">
                     {u.is_active ? (
                       <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-[11px] text-emerald-300">
-                        actif
+                        {t("admin.status.active")}
                       </span>
                     ) : (
                       <span className="rounded bg-zinc-500/15 px-2 py-0.5 text-[11px] text-zinc-400">
-                        désactivé
+                        {t("admin.status.inactive")}
                       </span>
                     )}
                   </td>
@@ -208,7 +209,7 @@ export default function AdminUsersPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        title="Éditer"
+                        title={t("admin.action.edit")}
                         onClick={() => setEditing(u)}
                       >
                         <UserCog className="h-3.5 w-3.5" />
@@ -216,7 +217,7 @@ export default function AdminUsersPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        title="Reset password"
+                        title={t("admin.action.reset_pw")}
                         onClick={() => setResettingPwdFor(u)}
                       >
                         <KeyRound className="h-3.5 w-3.5" />
@@ -224,7 +225,7 @@ export default function AdminUsersPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        title="Ajouter des crédits"
+                        title={t("admin.action.add_credits")}
                         onClick={() => setToppingUpFor(u)}
                         disabled={u.role === "admin"}
                       >
@@ -233,7 +234,7 @@ export default function AdminUsersPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        title="Supprimer"
+                        title={t("admin.action.delete")}
                         onClick={() => setDeleting(u)}
                         disabled={isMe}
                       >
@@ -253,7 +254,7 @@ export default function AdminUsersPage() {
         onOpenChange={setCreateOpen}
         onCreated={() => {
           void refresh();
-          toast({ title: "Utilisateur créé" });
+          toast({ title: t("admin.toast.created") });
         }}
       />
 
@@ -268,7 +269,7 @@ export default function AdminUsersPage() {
             // affiche les nouvelles valeurs sans rechargement.
             if (editing.id === me?.id) notifyUserRefresh();
             setEditing(null);
-            toast({ title: "Utilisateur mis à jour" });
+            toast({ title: t("admin.toast.updated") });
           }}
         />
       )}
@@ -279,7 +280,7 @@ export default function AdminUsersPage() {
           onOpenChange={(v) => !v && setResettingPwdFor(null)}
           onDone={() => {
             setResettingPwdFor(null);
-            toast({ title: "Password réinitialisé" });
+            toast({ title: t("admin.toast.pw_reset") });
           }}
         />
       )}
@@ -293,7 +294,7 @@ export default function AdminUsersPage() {
             // Idem : top-up sur soi-même → sidebar refresh.
             if (toppingUpFor.id === me?.id) notifyUserRefresh();
             setToppingUpFor(null);
-            toast({ title: "Crédits ajoutés" });
+            toast({ title: t("admin.toast.credits_added") });
           }}
         />
       )}
@@ -305,7 +306,7 @@ export default function AdminUsersPage() {
           onDeleted={() => {
             void refresh();
             setDeleting(null);
-            toast({ title: "Utilisateur supprimé" });
+            toast({ title: t("admin.toast.deleted") });
           }}
         />
       )}
@@ -337,6 +338,7 @@ function CreateUserDialog({
   onCreated: () => void;
 }) {
   const { toast } = useToast();
+  const t = useT();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<RoleOpt>("user");
@@ -400,14 +402,14 @@ function CreateUserDialog({
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      toast({ title: "Identifiants copiés" });
+      toast({ title: t("admin.success.copied_toast") });
       // Reset l'icône check après 2s pour ne pas piéger l'admin si
       // il copie de nouveau.
       setTimeout(() => setCopied(false), 2000);
     } catch {
       toast({
-        title: "Impossible de copier",
-        description: "Copie le texte manuellement.",
+        title: t("admin.success.copy_failed.title"),
+        description: t("admin.success.copy_failed.desc"),
       });
     }
   }
@@ -422,10 +424,9 @@ function CreateUserDialog({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Compte créé ✓</DialogTitle>
+            <DialogTitle>{t("admin.success.title")}</DialogTitle>
             <DialogDescription>
-              Communique ces identifiants à la personne en main propre —
-              ils ne seront plus jamais affichés ailleurs.
+              {t("admin.success.desc")}
             </DialogDescription>
           </DialogHeader>
           <pre className="select-all whitespace-pre-wrap rounded-md border border-border bg-background/40 p-3 font-mono text-xs">
@@ -438,9 +439,9 @@ function CreateUserDialog({
               ) : (
                 <Copy className="h-4 w-4" />
               )}
-              {copied ? "Copié !" : "Copier les identifiants"}
+              {copied ? t("common.copied") : t("admin.success.copy")}
             </Button>
-            <Button onClick={() => onOpenChange(false)}>Terminé</Button>
+            <Button onClick={() => onOpenChange(false)}>{t("common.done")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -452,28 +453,27 @@ function CreateUserDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Nouvel utilisateur</DialogTitle>
+          <DialogTitle>{t("admin.create.title")}</DialogTitle>
           <DialogDescription>
-            Crée le compte. Le user pourra se connecter immédiatement avec
-            ce username + password.
+            {t("admin.create.desc")}
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
-          <Field label="Username">
+          <Field label={t("admin.col.username")}>
             <Input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="ex: claire"
+              placeholder={t("admin.create.username.placeholder")}
               autoFocus
             />
           </Field>
-          <Field label="Password initial">
+          <Field label={t("admin.create.password.label")}>
             <div className="flex gap-2">
               <Input
                 type="text"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="min. 4 chars"
+                placeholder={t("admin.create.password.placeholder")}
                 className="flex-1 font-mono"
               />
               <Button
@@ -481,15 +481,15 @@ function CreateUserDialog({
                 variant="outline"
                 size="sm"
                 onClick={() => setPassword(generateStrongPassword())}
-                title="Générer un password aléatoire fort (14 chars)"
+                title={t("admin.create.password.generate_title")}
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                Générer
+                {t("admin.users.password.generate")}
               </Button>
             </div>
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Rôle">
+            <Field label={t("admin.col.role")}>
               <Select value={role} onValueChange={(v) => setRole(v as RoleOpt)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -498,20 +498,20 @@ function CreateUserDialog({
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Priorité queue">
+            <Field label={t("admin.create.priority.label")}>
               <Select value={priority} onValueChange={(v) => setPriority(v as PrioOpt)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="high">Haute</SelectItem>
-                  <SelectItem value="normal">Normale</SelectItem>
-                  <SelectItem value="low">Basse</SelectItem>
+                  <SelectItem value="high">{t("admin.users.priority.high")}</SelectItem>
+                  <SelectItem value="normal">{t("admin.users.priority.normal")}</SelectItem>
+                  <SelectItem value="low">{t("admin.users.priority.low")}</SelectItem>
                 </SelectContent>
               </Select>
             </Field>
           </div>
           {role === "user" && (
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Max templates">
+              <Field label={t("admin.create.max_templates")}>
                 <Input
                   type="number"
                   min={0}
@@ -519,7 +519,7 @@ function CreateUserDialog({
                   onChange={(e) => setMaxTemplates(Number(e.target.value))}
                 />
               </Field>
-              <Field label="Crédits initiaux">
+              <Field label={t("admin.create.credits_initial")}>
                 <Input
                   type="number"
                   min={0}
@@ -531,7 +531,7 @@ function CreateUserDialog({
           )}
           {role === "admin" && (
             <p className="text-[11px] text-muted-foreground">
-              Les admins ont des templates et crédits illimités par défaut.
+              {t("admin.create.admin_note")}
             </p>
           )}
           {error && (
@@ -540,13 +540,13 @@ function CreateUserDialog({
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Annuler
+            {t("common.cancel")}
           </Button>
           <Button
             onClick={submit}
             disabled={busy || !username || !password}
           >
-            {busy ? "…" : "Créer"}
+            {busy ? "…" : t("common.create")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -563,6 +563,7 @@ function EditUserDialog({
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
 }) {
+  const t = useT();
   const [username, setUsername] = useState(user.username);
   const [role, setRole] = useState<RoleOpt>(user.role);
   const [priority, setPriority] = useState<PrioOpt>(user.priority);
@@ -601,14 +602,14 @@ function EditUserDialog({
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Éditer {user.username}</DialogTitle>
+          <DialogTitle>{t("admin.edit.title", { name: user.username })}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-3">
-          <Field label="Username">
+          <Field label={t("admin.col.username")}>
             <Input value={username} onChange={(e) => setUsername(e.target.value)} />
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Rôle">
+            <Field label={t("admin.col.role")}>
               <Select value={role} onValueChange={(v) => setRole(v as RoleOpt)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -617,13 +618,13 @@ function EditUserDialog({
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Priorité queue">
+            <Field label={t("admin.create.priority.label")}>
               <Select value={priority} onValueChange={(v) => setPriority(v as PrioOpt)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="high">Haute</SelectItem>
-                  <SelectItem value="normal">Normale</SelectItem>
-                  <SelectItem value="low">Basse</SelectItem>
+                  <SelectItem value="high">{t("admin.users.priority.high")}</SelectItem>
+                  <SelectItem value="normal">{t("admin.users.priority.normal")}</SelectItem>
+                  <SelectItem value="low">{t("admin.users.priority.low")}</SelectItem>
                 </SelectContent>
               </Select>
             </Field>
@@ -632,14 +633,14 @@ function EditUserDialog({
             <Field
               label={
                 <span className="flex items-center gap-2">
-                  Max templates
+                  {t("admin.create.max_templates")}
                   <label className="flex cursor-pointer items-center gap-1 text-[10px] text-muted-foreground">
                     <input
                       type="checkbox"
                       checked={unlimitedTemplates}
                       onChange={(e) => setUnlimitedTemplates(e.target.checked)}
                     />
-                    illimité
+                    {t("admin.users.unlimited")}
                   </label>
                 </span>
               }
@@ -652,7 +653,7 @@ function EditUserDialog({
                 onChange={(e) => setMaxTemplates(Number(e.target.value))}
               />
             </Field>
-            <Field label="Crédits (valeur exacte)">
+            <Field label={t("admin.edit.credits_exact")}>
               <Input
                 type="number"
                 min={0}
@@ -667,16 +668,16 @@ function EditUserDialog({
               checked={isActive}
               onChange={(e) => setIsActive(e.target.checked)}
             />
-            Compte actif (peut se connecter)
+            {t("admin.edit.active_label")}
           </label>
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Annuler
+            {t("common.cancel")}
           </Button>
           <Button onClick={submit} disabled={busy || !username}>
-            {busy ? "…" : "Enregistrer"}
+            {busy ? "…" : t("common.save")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -693,13 +694,14 @@ function ResetPasswordDialog({
   onOpenChange: (v: boolean) => void;
   onDone: () => void;
 }) {
+  const t = useT();
   const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function submit() {
     if (!pw || pw.length < 4) {
-      setError("Min 4 caractères.");
+      setError(t("admin.reset.min_error"));
       return;
     }
     setBusy(true);
@@ -718,28 +720,27 @@ function ResetPasswordDialog({
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Reset password de {user.username}</DialogTitle>
+          <DialogTitle>{t("admin.reset.title", { name: user.username })}</DialogTitle>
           <DialogDescription>
-            Communique le nouveau mot de passe en main propre — il n&apos;y a
-            pas d&apos;envoi par email.
+            {t("admin.reset.desc")}
           </DialogDescription>
         </DialogHeader>
-        <Field label="Nouveau password">
+        <Field label={t("admin.reset.new_label")}>
           <Input
             type="text"
             autoFocus
             value={pw}
             onChange={(e) => setPw(e.target.value)}
-            placeholder="min. 4 chars"
+            placeholder={t("admin.create.password.placeholder")}
           />
         </Field>
         {error && <p className="text-xs text-destructive">{error}</p>}
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Annuler
+            {t("common.cancel")}
           </Button>
           <Button onClick={submit} disabled={busy || !pw}>
-            {busy ? "…" : "Réinitialiser"}
+            {busy ? "…" : t("admin.reset.submit")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -756,6 +757,7 @@ function TopUpDialog({
   onOpenChange: (v: boolean) => void;
   onDone: () => void;
 }) {
+  const t = useT();
   const [amount, setAmount] = useState(50);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -778,14 +780,12 @@ function TopUpDialog({
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Ajouter des crédits à {user.username}</DialogTitle>
+          <DialogTitle>{t("admin.topup.title", { name: user.username })}</DialogTitle>
           <DialogDescription>
-            Crédits actuels : <strong>{user.render_credits.toLocaleString("fr-FR")}</strong>.
-            Le montant est <strong>additif</strong> (pour SET la valeur exacte
-            utilise l&apos;édition).
+            {t("admin.topup.desc.prefix")} <strong>{user.render_credits.toLocaleString("fr-FR")}</strong>{t("admin.topup.desc.suffix")} <strong>{t("admin.topup.desc.additive")}</strong> {t("admin.topup.desc.end")}
           </DialogDescription>
         </DialogHeader>
-        <Field label="Montant à ajouter">
+        <Field label={t("admin.topup.amount_label")}>
           <Input
             type="number"
             min={1}
@@ -797,10 +797,10 @@ function TopUpDialog({
         {error && <p className="text-xs text-destructive">{error}</p>}
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Annuler
+            {t("common.cancel")}
           </Button>
           <Button onClick={submit} disabled={busy || amount <= 0}>
-            {busy ? "…" : `+${amount} crédits`}
+            {busy ? "…" : t("admin.topup.submit", { n: amount })}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -817,6 +817,7 @@ function DeleteUserDialog({
   onOpenChange: (v: boolean) => void;
   onDeleted: () => void;
 }) {
+  const t = useT();
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -841,15 +842,13 @@ function DeleteUserDialog({
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Supprimer {user.username} ?</DialogTitle>
+          <DialogTitle>{t("admin.delete.title", { name: user.username })}</DialogTitle>
           <DialogDescription>
-            Action <strong>irréversible</strong>. Tous ses templates
-            ({user.template_count}), ses jobs ({user.job_count}) et ses
-            fichiers seront définitivement effacés. Tape{" "}
+            {t("admin.delete.desc.prefix")} <strong>{t("admin.delete.desc.irreversible")}</strong>{t("admin.delete.desc.body", { tpl: user.template_count, jobs: user.job_count })}{" "}
             <code className="rounded bg-muted px-1 font-mono text-xs">
               {user.username}
             </code>{" "}
-            pour confirmer.
+            {t("admin.delete.desc.confirm")}
           </DialogDescription>
         </DialogHeader>
         <Input
@@ -861,14 +860,14 @@ function DeleteUserDialog({
         {error && <p className="text-xs text-destructive">{error}</p>}
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Annuler
+            {t("common.cancel")}
           </Button>
           <Button
             variant="destructive"
             onClick={submit}
             disabled={busy || !canDelete}
           >
-            {busy ? "…" : "Supprimer définitivement"}
+            {busy ? "…" : t("admin.delete.submit")}
           </Button>
         </DialogFooter>
       </DialogContent>

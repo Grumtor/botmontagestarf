@@ -21,6 +21,7 @@ import { fr as frLocale } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Render, type Template } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 type Props = {
   template: Template;
@@ -44,6 +45,7 @@ export function TemplateCard({
   globalVolume,
 }: Props) {
   const router = useRouter();
+  const t = useT();
   const videoRef = useRef<HTMLVideoElement>(null);
   // Bandwidth saver : pause auto la vidéo quand la carte sort de l'écran.
   // Sans ça, une vidéo loopée continue à consommer le réseau même quand
@@ -246,7 +248,7 @@ export function TemplateCard({
             className="absolute inset-x-2 bottom-2 z-[2] rounded-md border border-border bg-background/85 px-2 py-1.5 text-[11px] font-medium text-foreground backdrop-blur transition hover:bg-background"
           >
             <Wand2 className="mr-1 inline h-3 w-3" />
-            Générer un aperçu
+            {t("templates.card.generate_preview")}
           </button>
         )}
 
@@ -254,7 +256,7 @@ export function TemplateCard({
         {generating && (
           <div className="pointer-events-none absolute inset-0 z-[3] flex flex-col items-center justify-center gap-2 bg-black/60 text-[11px] text-white">
             <Loader2 className="h-5 w-5 animate-spin" />
-            Génération…
+            {t("templates.card.generating")}
           </div>
         )}
 
@@ -296,8 +298,8 @@ export function TemplateCard({
               className="h-1 w-16 accent-primary"
               title={
                 cardVolume === null
-                  ? "Volume (utilise le global, slide pour override)"
-                  : "Volume override"
+                  ? t("templates.card.volume.hint_global")
+                  : t("templates.card.volume.hint_override")
               }
             />
           </div>
@@ -311,7 +313,7 @@ export function TemplateCard({
           onClick={stop}
         >
           <IconBtn
-            label="Régénérer l'aperçu"
+            label={t("templates.card.regenerate")}
             onClick={generatePreview}
             disabled={generating}
           >
@@ -320,7 +322,7 @@ export function TemplateCard({
             />
           </IconBtn>
           <IconBtn
-            label="Edit"
+            label={t("templates.card.edit")}
             onClick={(e) => {
               stop(e);
               openEditor();
@@ -329,7 +331,7 @@ export function TemplateCard({
             <Pencil className="h-3.5 w-3.5" />
           </IconBtn>
           <IconBtn
-            label="Duplicate"
+            label={t("templates.card.duplicate")}
             onClick={(e) => {
               stop(e);
               onDuplicate(template.id);
@@ -338,7 +340,7 @@ export function TemplateCard({
             <Copy className="h-3.5 w-3.5" />
           </IconBtn>
           <IconBtn
-            label="Delete"
+            label={t("templates.card.delete")}
             destructive
             onClick={(e) => {
               stop(e);
@@ -367,7 +369,7 @@ export function TemplateCard({
           className="flex items-center justify-center gap-1.5 rounded-md bg-primary px-2 py-1.5 text-xs font-medium text-primary-foreground transition hover:opacity-90"
         >
           <Rocket className="h-3 w-3" />
-          Lance un render
+          {t("templates.card.run_render")}
         </button>
       </div>
     </div>

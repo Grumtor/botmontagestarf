@@ -28,6 +28,7 @@ import {
   type PlaceholderClip,
   type Template,
 } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 // ---- spoofing constants (same as old wizard) ------------------------
@@ -111,6 +112,7 @@ function defaultJobName(tpl?: string): string {
 
 export function RunRenderDialog({ template, onClose }: Props) {
   const router = useRouter();
+  const t = useT();
 
   // Parse placeholders in their timeline order.
   const placeholders = useMemo<PlaceholderClip[]>(() => {
@@ -245,7 +247,10 @@ export function RunRenderDialog({ template, onClose }: Props) {
             const item = list[i];
             if (!item || !item.token) {
               throw new Error(
-                `Placeholder #${placeholders.indexOf(p) + 1} : la vidéo ${i + 1} n'est pas uploadée.`,
+                t("render.dialog.error.placeholder_missing", {
+                  n: placeholders.indexOf(p) + 1,
+                  idx: i + 1,
+                }),
               );
             }
             fills[p.id] = item.token;
@@ -277,19 +282,19 @@ export function RunRenderDialog({ template, onClose }: Props) {
           <DialogTitle>
             <span className="flex items-center gap-2">
               <Rocket className="h-4 w-4" />
-              Lance un render — {template?.name}
+              {t("render.dialog.title", { name: template?.name ?? "" })}
             </span>
           </DialogTitle>
           <DialogDescription>
             {placeholders.length === 0
-              ? "Ce template n'a pas de placeholder. Tu vas générer un seul reel."
-              : `Drop des vidéos (.mp4/.mov) pour chaque placeholder. Le nombre par placeholder doit être identique — il définit le nombre de reels rendus.`}
+              ? t("render.dialog.desc.no_placeholder")
+              : t("render.dialog.desc.with_placeholder")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5">
           <label className="flex flex-col gap-1.5 text-sm">
-            <span>Nom du job</span>
+            <span>{t("render.wizard.job_name")}</span>
             <Input
               value={jobName}
               onChange={(e) => setJobName(e.target.value)}
@@ -323,29 +328,29 @@ export function RunRenderDialog({ template, onClose }: Props) {
           />
 
           <div className="rounded-md border border-border bg-card p-3 text-sm">
-            <strong>Récap :</strong>{" "}
+            <strong>{t("render.dialog.recap")}</strong>{" "}
             {placeholders.length === 0
-              ? "1 reel"
-              : `${renderCount} reel${renderCount > 1 ? "s" : ""}`}
-            {spoofEnabled && ` · spoofing ${model} / ${country}`}
+              ? t("render.dialog.recap.one_reel")
+              : t("render.dialog.recap.reels", { n: renderCount })}
+            {spoofEnabled && ` · ${t("render.dialog.recap.spoof", { model, country })}`}
           </div>
 
           {error && <p className="text-sm text-destructive">{error}</p>}
           {placeholders.length > 0 && !allCountsEqual && (
             <p className="text-xs text-yellow-400">
-              ⚠ Drop le même nombre de vidéos pour chaque placeholder.
+              {t("render.dialog.warn.uneven")}
             </p>
           )}
           {overLimit && (
             <p className="text-xs text-destructive">
-              Maximum 50 reels par batch — réduis le nombre de vidéos.
+              {t("render.dialog.overlimit")}
             </p>
           )}
         </div>
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={submitting}>
-            Annuler
+            {t("common.cancel")}
           </Button>
           <Button
             onClick={onLaunch}
@@ -359,10 +364,12 @@ export function RunRenderDialog({ template, onClose }: Props) {
           >
             <Rocket className="h-4 w-4" />
             {submitting
-              ? "Envoi…"
+              ? t("common.sending")
               : placeholders.length === 0
-                ? "Lancer 1 reel"
-                : `Lancer ${renderCount} reel${renderCount > 1 ? "s" : ""}`}
+                ? t("render.dialog.launch.one")
+                : renderCount > 1
+                  ? t("render.dialog.launch_plural", { n: renderCount })
+                  : t("render.dialog.launch", { n: renderCount })}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -385,6 +392,7 @@ function PlaceholderSection({
   onFiles: (files: File[]) => void;
   onRemove: (id: string) => void;
 }) {
+  const t = useT();
   const [drag, setDrag] = useState(false);
   const inputId = `placeholder-${index}`;
   const validCount = pendings.filter((p) => p.token).length;
@@ -393,13 +401,15 @@ function PlaceholderSection({
     <div className="space-y-2 rounded-md border border-yellow-500/40 bg-yellow-700/10 p-3">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-yellow-200">
-          📷 Placeholder #{index + 1}
+          {t("render.dialog.placeholder.title", { n: index + 1 })}
           <span className="ml-2 text-xs text-muted-foreground">
-            durée fixe {duration.toFixed(1)}s
+            {t("render.dialog.placeholder.duration", { n: duration.toFixed(1) })}
           </span>
         </span>
         <span className="text-xs text-muted-foreground">
-          {validCount}/{pendings.length} prêt{pendings.length > 1 ? "s" : ""}
+          {pendings.length > 1
+            ? t("render.dialog.placeholder.ready_plural", { ready: validCount, total: pendings.length })
+            : t("render.dialog.placeholder.ready", { ready: validCount, total: pendings.length })}
         </span>
       </div>
 
@@ -422,8 +432,8 @@ function PlaceholderSection({
       >
         <Upload className="h-5 w-5 text-muted-foreground" />
         <span>
-          Drop des vidéos ou{" "}
-          <span className="text-primary underline">parcours</span> (MP4 / MOV)
+          {t("render.dialog.placeholder.drop")}{" "}
+          <span className="text-primary underline">{t("render.dialog.placeholder.browse")}</span> (MP4 / MOV)
         </span>
         <input
           id={inputId}
@@ -451,7 +461,7 @@ function PlaceholderSection({
               {p.error ? (
                 <span className="text-destructive">{p.error}</span>
               ) : p.token ? (
-                <span className="text-emerald-400">✓ prêt</span>
+                <span className="text-emerald-400">{t("render.wizard.upload.video_ready")}</span>
               ) : (
                 <Progress value={p.progress} className="w-24" />
               )}
@@ -459,7 +469,7 @@ function PlaceholderSection({
                 type="button"
                 onClick={() => onRemove(p.id)}
                 className="text-muted-foreground hover:text-destructive"
-                title="Retirer"
+                title={t("common.remove")}
               >
                 <X className="h-3 w-3" />
               </button>
@@ -500,6 +510,7 @@ function SpoofingPanel({
   dateWindow: number;
   setDateWindow: (n: number) => void;
 }) {
+  const t = useT();
   return (
     <div className="space-y-3">
       <button
@@ -512,7 +523,7 @@ function SpoofingPanel({
             : "border-border hover:bg-accent/50",
         )}
       >
-        <span>Spoofer les métadonnées (iPhone)</span>
+        <span>{t("render.wizard.spoof_toggle")}</span>
         <OnOffBadge enabled={enabled} />
       </button>
 
@@ -521,7 +532,7 @@ function SpoofingPanel({
           {/* Modèle iPhone — défaut iPhone 17, click "Changer" pour swap */}
           <div className="space-y-1.5">
             <div className="text-xs text-muted-foreground">
-              Profil camera
+              {t("render.spoof.camera_profile")}
             </div>
             <div className="flex items-center gap-2">
               <span className="rounded-md border border-border bg-background px-2.5 py-1 text-[11px]">
@@ -532,7 +543,7 @@ function SpoofingPanel({
                 onClick={() => setShowModelPicker(!showModelPicker)}
                 className="text-[11px] text-muted-foreground underline transition hover:text-foreground"
               >
-                {showModelPicker ? "Replier" : "Changer"}
+                {showModelPicker ? t("common.collapse") : t("common.change")}
               </button>
             </div>
             {showModelPicker && (
@@ -561,13 +572,13 @@ function SpoofingPanel({
 
           <div className="grid grid-cols-2 gap-3">
             <SelectField
-              label="Pays"
+              label={t("render.spoof.country")}
               value={country}
               options={COUNTRIES}
               onChange={setCountry}
             />
             <SelectField
-              label="Langue"
+              label={t("render.spoof.language")}
               value={language}
               options={LANGUAGES.map((l) => ({ value: l, label: l }))}
               onChange={setLanguage}
@@ -575,7 +586,7 @@ function SpoofingPanel({
           </div>
           <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted-foreground">
-              Date dans les {dateWindow} derniers jours
+              {t("render.spoof.date_window", { n: dateWindow })}
             </span>
             <input
               type="range"

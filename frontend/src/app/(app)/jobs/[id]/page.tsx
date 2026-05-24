@@ -7,6 +7,7 @@ import { ArrowLeft, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Jobs, type JobRead, type JobStatus } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const STATUS_BADGE: Record<JobStatus, string> = {
@@ -23,6 +24,7 @@ export default function JobDetailPage({
 }) {
   const { id } = use(params);
   const numId = Number(id);
+  const t = useT();
   const [job, setJob] = useState<JobRead | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,7 +57,7 @@ export default function JobDetailPage({
   }, [numId, job?.status]);
 
   if (error) return <p className="text-sm text-destructive">{error}</p>;
-  if (!job) return <p className="text-sm text-muted-foreground">Chargement…</p>;
+  if (!job) return <p className="text-sm text-muted-foreground">{t("common.loading")}</p>;
 
   return (
     <div className="space-y-6">
@@ -82,13 +84,13 @@ export default function JobDetailPage({
               STATUS_BADGE[job.status],
             )}
           >
-            {job.status}
+            {t(`jobs.status.${job.status}`)}
           </span>
           {job.output_zip_path && job.status === "done" && (
             <Button asChild>
               <a href={`/api/files/render/${job.id}`} download>
                 <Download className="h-4 w-4" />
-                ZIP global
+                {t("jobs.zip_global")}
               </a>
             </Button>
           )}
@@ -98,7 +100,7 @@ export default function JobDetailPage({
       {(job.status === "running" || job.status === "queued") && (
         <div className="rounded-md border border-border bg-card p-4">
           <div className="mb-2 text-xs text-muted-foreground">
-            Progression : {job.progress}%
+            {t("jobs.progress", { pct: job.progress })}
           </div>
           <Progress value={job.progress} />
         </div>
@@ -106,7 +108,7 @@ export default function JobDetailPage({
 
       {job.status === "failed" && job.error && (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
-          <div className="font-medium">Erreur</div>
+          <div className="font-medium">{t("jobs.error")}</div>
           <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px]">
             {job.error}
           </pre>
@@ -115,10 +117,10 @@ export default function JobDetailPage({
 
       <div>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Fichiers de sortie ({job.output_files.length})
+          {t("jobs.detail.output_files", { n: job.output_files.length })}
         </h2>
         {job.output_files.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Aucun fichier rendu.</p>
+          <p className="text-sm text-muted-foreground">{t("jobs.no_files")}</p>
         ) : (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
             {job.output_files.map((path, idx) => {

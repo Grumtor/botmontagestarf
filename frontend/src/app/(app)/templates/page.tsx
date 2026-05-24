@@ -23,11 +23,13 @@ import { SampleVideoDialog } from "@/components/templates/sample-video-dialog";
 import { TemplateCard } from "@/components/templates/template-card";
 import { Templates, type Template, type TemplateCreateInput } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { useT } from "@/lib/i18n";
 import { useRouter } from "next/navigation";
 
 export default function TemplatesPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const t = useT();
   const [items, setItems] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -81,7 +83,7 @@ export default function TemplatesPage() {
       // template limit is reached. Surface it as a toast — same UX as
       // any other action error.
       toast({
-        title: "Création impossible",
+        title: t("templates.delete.error.title"),
         description: msg,
       });
       // Re-throw so the dialog stays open and the user can adjust.
@@ -97,7 +99,7 @@ export default function TemplatesPage() {
       const msg = err instanceof Error ? err.message : "Erreur duplicate";
       // 403 if max_templates atteint — même UX que ci-dessus.
       toast({
-        title: "Duplication impossible",
+        title: t("templates.duplicate.error.title"),
         description: msg,
       });
       setError(msg);
@@ -122,8 +124,8 @@ export default function TemplatesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Templates</h1>
-          <p className="text-sm text-muted-foreground">Tes templates de montage.</p>
+          <h1 className="text-2xl font-semibold tracking-tight">{t("templates.title")}</h1>
+          <p className="text-sm text-muted-foreground">{t("templates.subtitle_short")}</p>
         </div>
         <div className="flex items-center gap-2">
           <SampleVideoDialog />
@@ -142,23 +144,23 @@ export default function TemplatesPage() {
               type="button"
               onClick={() => setCurrentlyPlayingId(null)}
               className="flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/15 px-2 py-1 text-xs font-medium text-primary transition hover:bg-primary/25"
-              title="Mettre en pause l'aperçu en cours"
+              title={t("templates.pause_preview.title")}
             >
               <Pause className="h-3.5 w-3.5" />
-              Pause aperçu
+              {t("templates.pause_preview")}
             </button>
           )}
           {/* Global volume slider — default for every card.
               Per-card sliders override on hover. */}
           <div
             className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1"
-            title="Volume global pour les aperçus"
+            title={t("templates.volume.global_title")}
           >
             <button
               type="button"
               onClick={() => setGlobalVolume(globalVolume > 0 ? 0 : 0.5)}
               className="text-muted-foreground transition hover:text-foreground"
-              aria-label={globalVolume > 0 ? "Couper le son" : "Activer le son"}
+              aria-label={globalVolume > 0 ? t("templates.volume.mute") : t("templates.volume.unmute")}
             >
               {globalVolume > 0 ? (
                 <Volume2 className="h-3.5 w-3.5" />
@@ -178,7 +180,7 @@ export default function TemplatesPage() {
           </div>
           <Input
             type="search"
-            placeholder="Rechercher par nom…"
+            placeholder={t("templates.search.placeholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="sm:max-w-xs"
@@ -189,12 +191,12 @@ export default function TemplatesPage() {
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       {loading ? (
-        <p className="text-sm text-muted-foreground">Chargement…</p>
+        <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
       ) : visible.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {items.length === 0
-            ? "Aucun template — clique sur « + New template »."
-            : "Aucun template ne correspond aux filtres."}
+            ? t("templates.empty_short")
+            : t("templates.empty_filtered")}
         </p>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
@@ -224,19 +226,19 @@ export default function TemplatesPage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Supprimer le template ?</DialogTitle>
+            <DialogTitle>{t("templates.delete_dialog.title")}</DialogTitle>
             <DialogDescription>
               {pendingDelete
-                ? `« ${pendingDelete.name} » sera supprimé. Cette action est irréversible.`
+                ? t("templates.delete_dialog.desc", { name: pendingDelete.name })
                 : ""}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setPendingDelete(null)}>
-              Annuler
+              {t("common.cancel")}
             </Button>
             <Button variant="destructive" onClick={onConfirmDelete} disabled={deleting}>
-              {deleting ? "Suppression…" : "Supprimer"}
+              {deleting ? t("common.deleting") : t("common.delete")}
             </Button>
           </DialogFooter>
         </DialogContent>
