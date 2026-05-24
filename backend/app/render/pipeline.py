@@ -932,6 +932,29 @@ def build_render_command(
         )
         audio_label = "mix_a"
 
+    # Phase 30 — Normalisation finale du flux audio avant mux.
+    #
+    # Bug visé : son OK sur PC, MUET sur téléphone (iOS + Android),
+    # peu importe la plateforme de partage (Telegram, Discord, direct
+    # download). Symptôme classique d'un AAC mal-formé : les decoders
+    # software desktop (VLC, Chrome) sont tolérants et jouent quand
+    # même, les hardware decoders mobile sont stricts et drop le track
+    # silencieusement.
+    #
+    # Cause : sources MP4 hétérogènes (44.1k/48k, mono/stereo, s16/fltp)
+    # qui entrent dans `concat` puis `amix` sans normalisation. Le
+    # résultat peut avoir des sample tables incohérentes que le hardware
+    # decoder mobile refuse.
+    #
+    # Fix : on force le flux final dans le format canonique
+    # 48000 Hz / float planar / stereo AVANT l'encodage AAC. C'est
+    # exactement ce qu'attendent iOS et Android comme entrée standard.
+    chains.append(
+        f"[{audio_label}]aresample=48000,"
+        f"aformat=sample_fmts=fltp:channel_layouts=stereo[a_out]"
+    )
+    audio_label = "a_out"
+
     fc = ";".join(chains)
 
     args: list[str] = [ffmpeg_exe(), "-y", *inputs, "-filter_complex", fc]
@@ -948,6 +971,12 @@ def build_render_command(
             "-level", "4.0",
             "-r", str(fps),
             "-c:a", "aac",
+            # Force LC-AAC explicite (Low Complexity) — le profil le
+            # plus universellement supporté par les hardware decoders
+            # mobile. Sans flag, ffmpeg peut basculer sur HE-AAC à
+            # certains bitrates, ce que Android < 9 et certains chipsets
+            # iPhone ne décodent pas en hardware → audio muet.
+            "-profile:a", "aac_low",
             "-b:a", "192k",
             "-ac", "2",
             # 48 kHz is what iPhone/iOS record at and what mobile MP4
