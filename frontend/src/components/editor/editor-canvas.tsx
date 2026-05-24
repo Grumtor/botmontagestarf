@@ -465,6 +465,7 @@ function CanvasLayer({
   const selectedLayerId = useEditorStore((s) => s.selectedLayerId);
   const setSelected = useEditorStore((s) => s.setSelectedLayerId);
   const patchLayer = useEditorStore((s) => s.patchLayer);
+  const patchLayerData = useEditorStore((s) => s.patchLayerData);
   const selected = layer.id === selectedLayerId;
 
   const isText = layer.type === "text";
@@ -545,6 +546,20 @@ function CanvasLayer({
     const top = handle.includes("t");
     const bottom = handle.includes("b");
 
+    // Phase 33 — Pour un layer texte, drag d'un coin (tl/tr/bl/br) doit
+    // aussi scaler la `font_size_pct` et `max_width_pct` du data. Sinon
+    // l'user a une preview "texte plus petit" (parce que la bbox shrink
+    // wrap le texte) mais le ffmpeg drawtext utilise toujours le
+    // font_size original → décalage visible entre preview et rendu
+    // final. On capture les valeurs initiales ici pour les multiplier
+    // par le scale ratio à chaque frame du onMove.
+    //
+    // Edges seuls (tm/bm/ml/mr) restent inchangés : juste la bbox
+    // bouge, le texte garde sa taille (use case "élargir la zone
+    // d'affichage sans changer le texte").
+    const initFontSize = textData?.font_size_pct ?? 0;
+    const initMaxWidth = textData?.max_width_pct ?? 100;
+
     function onMove(ev: MouseEvent) {
       const dxPx = ev.clientX - startX;
       const dyPx = ev.clientY - startY;
@@ -606,6 +621,20 @@ function CanvasLayer({
         width_pct: newW,
         height_pct: newH,
       });
+
+      // Text layers : sync font_size_pct + max_width_pct au scale de
+      // la bbox quand l'user drag un coin. scaleY pour la font (qui
+      // est en cqh), scaleX pour le max_width (en cqw). Sans ça,
+      // ffmpeg rend toujours avec le font_size original → preview ≠
+      // rendu final.
+      if (isText && textData && isCorner) {
+        const scaleY = init.h > 0 ? newH / init.h : 1;
+        const scaleX = init.w > 0 ? newW / init.w : 1;
+        patchLayerData(layer.id, {
+          font_size_pct: initFontSize * scaleY,
+          max_width_pct: initMaxWidth * scaleX,
+        });
+      }
     }
     function onUp() {
       window.removeEventListener("mousemove", onMove);
