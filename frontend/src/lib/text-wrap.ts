@@ -217,13 +217,23 @@ export type PrecomputeInput = {
 };
 
 /**
- * True iff the requested font is already loaded into the document's
- * font set. Critical because `font-display: swap` means our @font-face
- * fonts download asynchronously — if we call canvas.measureText before
- * the font is loaded, the canvas silently falls back to system-ui and
- * the metrics are completely wrong (= the bug the user kept seeing
- * even after we shipped the pre-wrap : the wrap was computed against
- * a totally different font than what the DOM eventually rendered).
+ * True iff the requested font is already loaded AND actually usable by
+ * canvas.measureText. Critical because `font-display: swap` means our
+ * @font-face fonts download asynchronously — if we call
+ * canvas.measureText before the font is loaded, the canvas silently
+ * falls back to system-ui and the metrics are completely wrong.
+ *
+ * Why not just use document.fonts.check() ? Known Chrome bug
+ * (https://issues.chromium.org/issues/40698829) where check() returns
+ * true while canvas.measureText still uses the fallback because the
+ * font hasn't been decoded for canvas yet. Result : preview ≠ render
+ * because canvas wrap was computed against system-ui metrics.
+ *
+ * Robust heuristic : measure a reference string with the custom font
+ * AND with explicit monospace. If widths differ, the canvas IS using
+ * our custom font (its glyphs are wider/narrower than monospace's).
+ * If they match exactly, canvas fell back to monospace = custom font
+ * not actually loaded for canvas use.
  */
 export function isFontReady(
   fontId: FontId,
@@ -231,13 +241,25 @@ export function isFontReady(
   bold: boolean,
   italic: boolean,
 ): boolean {
-  if (typeof document === "undefined" || !document.fonts) return false;
-  const spec = buildCssFont(fontFamily(fontId), fontSizePx, bold, italic);
-  try {
-    return document.fonts.check(spec);
-  } catch {
-    return false;
-  }
+  if (typeof document === "undefined") return false;
+  const ctx = getCtx();
+  if (!ctx) return false;
+
+  const family = fontFamily(fontId);
+  const weight = bold ? "700" : "400";
+  const style = italic ? "italic" : "normal";
+  // Reference string : a mix of wide and narrow glyphs so the diff
+  // between proportional fonts and monospace is unambiguous.
+  const sample = "WiQg.,!";
+
+  ctx.font = `${style} ${weight} ${fontSizePx}px '${family}', monospace`;
+  const wCustom = ctx.measureText(sample).width;
+  ctx.font = `${style} ${weight} ${fontSizePx}px monospace`;
+  const wMono = ctx.measureText(sample).width;
+
+  // If the difference is < 0.5px, both runs used monospace → custom
+  // font not actually available for canvas use.
+  return Math.abs(wCustom - wMono) > 0.5;
 }
 
 /**
