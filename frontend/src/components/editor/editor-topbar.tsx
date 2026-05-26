@@ -8,11 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Render } from "@/lib/api";
 import { useEditorStore } from "@/store/editor";
+import { useT } from "@/lib/i18n";
 import { CoverPickerDialog } from "./cover-picker-dialog";
 import { RenderPreviewDialog } from "./render-preview-dialog";
 
 export function EditorTopbar() {
   const router = useRouter();
+  const t = useT();
   const template = useEditorStore((s) => s.template);
   const clips = useEditorStore((s) => s.clips);
   const patchTemplate = useEditorStore((s) => s.patchTemplate);
@@ -108,6 +110,20 @@ export function EditorTopbar() {
           onChange={(e) => patchTemplate({ name: e.target.value })}
           className="h-8 max-w-xs text-sm"
           aria-label="Nom du template"
+        />
+        {/* Phase 36 — Catégorie libre (Sport, Lifestyle, TikTok…).
+            Vide = pas de catégorie. Trim côté store avant POST. Max 100
+            chars (validé Zod côté API). */}
+        <Input
+          value={template.category ?? ""}
+          onChange={(e) =>
+            patchTemplate({ category: e.target.value.slice(0, 100) })
+          }
+          maxLength={100}
+          placeholder={t("editor.template.category.placeholder")}
+          className="h-8 w-40 text-sm"
+          aria-label={t("editor.template.category")}
+          title={t("editor.template.category")}
         />
         <button
           type="button"

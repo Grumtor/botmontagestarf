@@ -35,6 +35,9 @@ export default function TemplatesPage() {
   const [error, setError] = useState<string | null>(null);
   const [language, setLanguage] = useState<LanguageFilterValue>("ALL");
   const [search, setSearch] = useState("");
+  // Phase 36 — filtre par catégorie. "ALL" = toutes. null = pas de
+  // filtre actif (équivalent ALL).
+  const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [pendingDelete, setPendingDelete] = useState<Template | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [runRenderTarget, setRunRenderTarget] = useState<Template | null>(null);
@@ -64,14 +67,30 @@ export default function TemplatesPage() {
     void reload();
   }, [reload]);
 
+  // Phase 36 — catégories distinctes triées alpha. Calculée sur la
+  // liste complète (pas la liste filtrée) pour que les chips ne
+  // disparaissent pas en changeant de langue/search.
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of items) {
+      const c = item.category?.trim();
+      if (c) set.add(c);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [items]);
+
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
     return items.filter((t) => {
       if (language !== "ALL" && t.language !== language) return false;
+      if (categoryFilter !== "ALL") {
+        const c = t.category?.trim() ?? "";
+        if (c !== categoryFilter) return false;
+      }
       if (term && !t.name.toLowerCase().includes(term)) return false;
       return true;
     });
-  }, [items, language, search]);
+  }, [items, language, search, categoryFilter]);
 
   async function onCreate(data: TemplateCreateInput) {
     try {
@@ -187,6 +206,43 @@ export default function TemplatesPage() {
           />
         </div>
       </div>
+
+      {/* Phase 36 — barre de filtres par catégorie. Cachée si 0 ou 1
+          catégorie au total (inutile dans ce cas). */}
+      {categories.length >= 2 && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-muted-foreground">
+            {t("templates.category.filter_label")}
+          </span>
+          <button
+            type="button"
+            onClick={() => setCategoryFilter("ALL")}
+            className={
+              "rounded-md border px-2.5 py-1 transition " +
+              (categoryFilter === "ALL"
+                ? "border-primary bg-accent"
+                : "border-border hover:bg-accent/50")
+            }
+          >
+            {t("templates.category.all")}
+          </button>
+          {categories.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setCategoryFilter(c)}
+              className={
+                "rounded-md border px-2.5 py-1 transition " +
+                (categoryFilter === c
+                  ? "border-primary bg-accent"
+                  : "border-border hover:bg-accent/50")
+              }
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      )}
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 

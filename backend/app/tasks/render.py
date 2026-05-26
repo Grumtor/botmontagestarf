@@ -71,9 +71,14 @@ def process_render_job(job_id: int) -> None:
         out_dir = RENDERS_DIR / str(job.id)
         out_dir.mkdir(parents=True, exist_ok=True)
         output_files: list[str] = []
-        # Phase 29 — track (file_path, gen_idx) so we can group outputs
-        # into `Generation N/` subdirs in the final ZIP when generations > 1.
-        output_entries: list[tuple[str, int]] = []
+        # Phase 29 — track (file_path, gen_idx, order_idx) so we can group
+        # outputs into `Generation N/` subdirs in the final ZIP when
+        # generations > 1.
+        # Phase 36 — `order_idx` = position de l'assignment dans la liste
+        # envoyée par le frontend. On l'utilise comme clé de tri secondaire
+        # pour préserver l'ordre voulu (v1×t1, v1×t2, v2×t1…) au lieu de
+        # trier par nom de fichier (qui re-groupait par template name).
+        output_entries: list[tuple[str, int, int]] = []
         max_gen = 1
         # Phase 36 — per-assignment failure tracking. When one render
         # blows up (e.g. ffmpeg refused a corrupted/too-small input),
@@ -165,7 +170,7 @@ def process_render_job(job_id: int) -> None:
                     log.exception("metadata spoof failed for %s: %s", output_path, e)
 
             output_files.append(str(output_path))
-            output_entries.append((str(output_path), gen_idx))
+            output_entries.append((str(output_path), gen_idx, i))
             job.output_files = list(output_files)
             job.progress = int((i + 1) / total * 100)
             db.commit()
@@ -212,8 +217,11 @@ def process_render_job(job_id: int) -> None:
         pass_label = str(metadata_profile.get("pass_label") or "Generation")
         multi_gen = max_gen > 1
         zip_path = RENDERS_DIR / f"{job.id}.zip"
-        # Sort by gen_idx so output is grouped consistently in the ZIP.
-        sorted_entries = sorted(output_entries, key=lambda e: (e[1], e[0]))
+        # Sort primary by gen_idx (groups passes when generations > 1),
+        # secondary by the original assignment index — preserves the
+        # frontend's intended ordering (Phase 36 : v1×t1, v1×t2, v2×t1…
+        # instead of grouping by template name).
+        sorted_entries = sorted(output_entries, key=lambda e: (e[1], e[2]))
 
         # Pre-compute the apple-style filename per output path so the
         # individual download endpoint (/api/files/render_item/...) can
@@ -230,12 +238,12 @@ def process_render_job(job_id: int) -> None:
         apple_name_by_path: dict[str, str] = {}
         if naming == "iphone":
             counter = random.randint(1500, 9000)
-            for f, _gen_idx in sorted_entries:
+            for f, _gen_idx, _order_idx in sorted_entries:
                 apple_name_by_path[f] = f"IMG_{counter:04d}.mp4"
                 counter += 1
 
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
-            for f, gen_idx in sorted_entries:
+            for f, gen_idx, _order_idx in sorted_entries:
                 base_arc = (
                     apple_name_by_path[f] if naming == "iphone" else Path(f).name
                 )

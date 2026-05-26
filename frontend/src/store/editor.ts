@@ -180,7 +180,7 @@ type EditorState = {
     patch: Partial<
       Pick<
         Template,
-        "name" | "language" | "description" | "cover_ext" | "cover_time_sec"
+        "name" | "language" | "description" | "category" | "cover_ext" | "cover_time_sec"
       >
     >,
   ) => void;
@@ -1007,6 +1007,13 @@ async function persist(get: () => EditorState) {
       name: s.template.name,
       language: s.template.language,
       description: s.template.description ?? undefined,
+      // Phase 36 — category (free-form, null = uncategorised). Send
+      // an empty string as null so clearing the field actually clears
+      // the column server-side.
+      category:
+        typeof s.template.category === "string"
+          ? s.template.category.trim() || null
+          : (s.template.category ?? null),
       clips: s.clips,
       extra_tracks: s.extraTracks,
       layers: s.layers,

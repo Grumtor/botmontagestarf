@@ -305,6 +305,18 @@ export function TemplateCard({
           </div>
         )}
 
+        {/* Phase 36 — chip catégorie en haut à gauche si défini.
+            Hidden quand un overlay (generate / error / spinner) le
+            recouvrirait pour pas faire de superposition moche. */}
+        {template.category && (
+          <span
+            className="pointer-events-none absolute left-2 top-2 z-[2] rounded bg-zinc-700/90 px-2 py-0.5 text-[10px] font-medium text-zinc-200 backdrop-blur"
+            title={template.category}
+          >
+            {template.category}
+          </span>
+        )}
+
         {/* Edit / Regen / Duplicate / Delete — always visible (subtle by
             default, full opacity on hover) so the user never wonders why
             the card looks dead. */}

@@ -143,6 +143,8 @@ export default function RenderWizardPage() {
   // Step 2 — template selection
   const [allTemplates, setAllTemplates] = useState<Template[] | null>(null);
   const [langFilter, setLangFilter] = useState<TemplateLanguage | "ALL">("ALL");
+  // Phase 36 — filtre par catégorie (free-form, "ALL" = toutes).
+  const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [mode, setMode] = useState<WizardMode>("all");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   // Per-video → array of template ids. Each (video, template) pair = 1 reel,
@@ -185,10 +187,27 @@ export default function RenderWizardPage() {
     return (allTemplates ?? []).filter((t) => getPlaceholders(t).length > 0);
   }, [allTemplates]);
 
+  // Phase 36 — catégories distinctes dans le pool usable. Triées alpha,
+  // utilisées pour les chips de filtre dans le wizard.
+  const wizardCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of usableTemplates) {
+      const c = t.category?.trim();
+      if (c) set.add(c);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [usableTemplates]);
+
   const visibleTemplates = useMemo(() => {
-    if (langFilter === "ALL") return usableTemplates;
-    return usableTemplates.filter((t) => t.language === langFilter);
-  }, [usableTemplates, langFilter]);
+    return usableTemplates.filter((t) => {
+      if (langFilter !== "ALL" && t.language !== langFilter) return false;
+      if (categoryFilter !== "ALL") {
+        const c = t.category?.trim() ?? "";
+        if (c !== categoryFilter) return false;
+      }
+      return true;
+    });
+  }, [usableTemplates, langFilter, categoryFilter]);
 
   const readyVideos = uploads.filter((u) => u.token);
   const allVideosReady =
@@ -317,11 +336,16 @@ export default function RenderWizardPage() {
     };
 
     if (mode === "all") {
-      for (const tplId of selectedIds) {
-        const tpl = tplById.get(tplId);
-        if (!tpl) continue;
-        for (const v of readyVideos) {
-          if (!v.token) continue;
+      // Phase 36 — ordre v1×t1, v1×t2, …, v2×t1, v2×t2, … : on itère
+      // les vidéos en outer loop et les templates en inner loop, pour
+      // que le ZIP regroupe naturellement par vidéo source (utile
+      // quand l'user veut comparer plusieurs templates sur la même
+      // vidéo).
+      for (const v of readyVideos) {
+        if (!v.token) continue;
+        for (const tplId of selectedIds) {
+          const tpl = tplById.get(tplId);
+          if (!tpl) continue;
           out.push({ template_id: tpl.id, fills: fillFor(tpl, v.token) });
         }
       }
@@ -444,6 +468,9 @@ export default function RenderWizardPage() {
             setMode={setMode}
             langFilter={langFilter}
             setLangFilter={setLangFilter}
+            categoryFilter={categoryFilter}
+            setCategoryFilter={setCategoryFilter}
+            categories={wizardCategories}
             templates={visibleTemplates}
             allTemplatesLoaded={allTemplates !== null}
             selectedIds={selectedIds}
@@ -717,6 +744,9 @@ function Step2Templates({
   setMode,
   langFilter,
   setLangFilter,
+  categoryFilter,
+  setCategoryFilter,
+  categories,
   templates,
   allTemplatesLoaded,
   selectedIds,
@@ -731,6 +761,9 @@ function Step2Templates({
   setMode: (m: WizardMode) => void;
   langFilter: TemplateLanguage | "ALL";
   setLangFilter: (v: TemplateLanguage | "ALL") => void;
+  categoryFilter: string;
+  setCategoryFilter: (v: string) => void;
+  categories: string[];
   templates: Template[];
   allTemplatesLoaded: boolean;
   selectedIds: Set<number>;
@@ -822,6 +855,44 @@ function Step2Templates({
               {t("render.wizard.clear")}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Phase 36 — filtre par catégorie. Cachée en mode per_video
+          (l'user voit toutes ses templates par vidéo de toute façon)
+          et si <2 catégories distinctes. */}
+      {mode !== "per_video" && categories.length >= 2 && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-muted-foreground">
+            {t("templates.category.filter_label")}
+          </span>
+          <button
+            type="button"
+            onClick={() => setCategoryFilter("ALL")}
+            className={cn(
+              "rounded-md border px-2.5 py-1 transition",
+              categoryFilter === "ALL"
+                ? "border-primary bg-accent"
+                : "border-border hover:bg-accent/50",
+            )}
+          >
+            {t("templates.category.all")}
+          </button>
+          {categories.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setCategoryFilter(c)}
+              className={cn(
+                "rounded-md border px-2.5 py-1 transition",
+                categoryFilter === c
+                  ? "border-primary bg-accent"
+                  : "border-border hover:bg-accent/50",
+              )}
+            >
+              {c}
+            </button>
+          ))}
         </div>
       )}
 
