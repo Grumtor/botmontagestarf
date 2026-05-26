@@ -2,7 +2,7 @@
 
 import { useEffect, useState, use } from "react";
 import Link from "next/link";
-import { ArrowLeft, Download } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Download } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -86,6 +86,10 @@ export default function JobDetailPage({
           >
             {t(`jobs.status.${job.status}`)}
           </span>
+          {/* Phase 36 — ZIP available as soon as the path is set,
+              EVEN if status=failed (partial success path is ruled out,
+              but a done job with some failures still has a ZIP with
+              the successful renders). */}
           {job.output_zip_path && job.status === "done" && (
             <Button asChild>
               <a href={`/api/files/render/${job.id}`} download>
@@ -112,6 +116,41 @@ export default function JobDetailPage({
           <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px]">
             {job.error}
           </pre>
+        </div>
+      )}
+
+      {/* Phase 36 — Per-item failures, when the batch had partial
+          successes. status=done + non-empty failed_assignments. */}
+      {job.failed_assignments && job.failed_assignments.length > 0 && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-4 text-amber-100">
+          <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+            <AlertTriangle className="h-4 w-4" />
+            {t("jobs.failed_items.title", {
+              n: job.failed_assignments.length,
+              total: job.assignments.length,
+            })}
+          </div>
+          <p className="mb-3 text-xs text-amber-200/80">
+            {t("jobs.failed_items.refunded", {
+              n: job.failed_assignments.length,
+            })}
+          </p>
+          <ul className="space-y-1 text-xs">
+            {job.failed_assignments.map((fa) => (
+              <li
+                key={fa.index}
+                className="rounded border border-amber-500/30 bg-black/20 p-2"
+              >
+                <div className="font-medium">
+                  #{fa.index + 1}
+                  {fa.template_name ? ` · ${fa.template_name}` : ""}
+                </div>
+                <pre className="mt-1 whitespace-pre-wrap font-mono text-[10px] text-amber-200/70">
+                  {fa.error}
+                </pre>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.db import SessionLocal
-from app.db.models import JobStatus, RenderJob, Template
+from app.db.models import JobStatus, RenderJob, Template, User
 from app.render.batch_runner import gather_render_inputs, run_render
 from app.render.metadata import apply_quicktime_metadata
 from app.storage import RENDERS_DIR, TEMP_DIR
@@ -75,6 +75,13 @@ def process_render_job(job_id: int) -> None:
         # into `Generation N/` subdirs in the final ZIP when generations > 1.
         output_entries: list[tuple[str, int]] = []
         max_gen = 1
+        # Phase 36 — per-assignment failure tracking. When one render
+        # blows up (e.g. ffmpeg refused a corrupted/too-small input),
+        # we DON'T fail the whole batch anymore — we record the error
+        # and keep going. At the end, partial success gets a status=done
+        # with the failed_assignments list populated, AND we refund the
+        # corresponding credits to the user.
+        failed_assignments: list[dict] = []
 
         for i, assign in enumerate(assignments):
             template_id = assign.get("template_id")
@@ -86,6 +93,18 @@ def process_render_job(job_id: int) -> None:
             template = db.get(Template, template_id)
             if template is None:
                 log.warning("Template %s not found, skipping", template_id)
+                failed_assignments.append({
+                    "index": i,
+                    "template_id": template_id,
+                    "template_name": None,
+                    "error": f"Template {template_id} introuvable",
+                })
+                # Always consume the tokens of a skipped assignment so
+                # they get cleaned up at the end (the user already
+                # uploaded the video — we just couldn't use it here).
+                consumed_tokens.update(fills.values())
+                job.progress = int((i + 1) / total * 100)
+                db.commit()
                 continue
 
             # Filename inclut le gen index pour pas collisionner sur disk
@@ -105,8 +124,37 @@ def process_render_job(job_id: int) -> None:
                     timeout=FFMPEG_TIMEOUT_SEC,
                 )
             except Exception as e:
-                log.exception("Render failed for assignment %d: %s", i, e)
-                raise RuntimeError(f"assignment {i} failed: {e}") from e
+                # Phase 36 — isolate the failure : log it, record it on
+                # the job for the UI, but DON'T raise. The next render
+                # in the loop still runs. Refund credit handled below.
+                log.exception(
+                    "Render failed for assignment %d (template=%s): %s",
+                    i, template.name if template else template_id, e,
+                )
+                err_msg = str(e)
+                # Trim very long ffmpeg stderr dumps so the JSON stays
+                # readable in the UI ; full trace is in the server log.
+                if len(err_msg) > 600:
+                    err_msg = err_msg[:600] + "… (tronqué)"
+                failed_assignments.append({
+                    "index": i,
+                    "template_id": template_id,
+                    "template_name": template.name,
+                    "error": err_msg,
+                })
+                # Still consume the tokens (they're "used up" from the
+                # user's POV — the upload happened).
+                consumed_tokens.update(fills.values())
+                # If a half-written output exists, drop it so we don't
+                # ZIP a corrupt file later.
+                try:
+                    output_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                job.progress = int((i + 1) / total * 100)
+                job.failed_assignments = list(failed_assignments)
+                db.commit()
+                continue
 
             consumed_tokens.update(fills.values())
 
@@ -121,6 +169,39 @@ def process_render_job(job_id: int) -> None:
             job.output_files = list(output_files)
             job.progress = int((i + 1) / total * 100)
             db.commit()
+
+        # Phase 36 — refund credits for failed assignments. The user
+        # was charged 1 credit per assignment at create_batch time ;
+        # we give back 1 per failure so they're only billed for actual
+        # successful renders.
+        n_failed = len(failed_assignments)
+        if n_failed > 0 and job.owner_id:
+            try:
+                u = db.get(User, job.owner_id)
+                if u is not None:
+                    u.render_credits = (u.render_credits or 0) + n_failed
+                    db.commit()
+                    log.info(
+                        "Refunded %d credits to user %s for failed assignments in job %s",
+                        n_failed, u.username, job.id,
+                    )
+            except Exception:
+                log.exception("Failed to refund credits for job %s", job.id)
+                db.rollback()
+
+        # If EVERY assignment failed, there's nothing to ZIP — mark
+        # the job as failed instead of done with an empty ZIP.
+        if not output_entries:
+            job.status = JobStatus.failed
+            job.error = (
+                f"Tous les rendus ont échoué ({n_failed}/{total}). "
+                "Crédits remboursés."
+            )
+            job.progress = 100
+            job.finished_at = datetime.now(timezone.utc)
+            job.failed_assignments = list(failed_assignments)
+            db.commit()
+            return
 
         # ZIP all outputs. Phase 29 — Apple-style naming optionnel +
         # group by pass when max_gen > 1 (each pass in its own subdir).
@@ -177,6 +258,14 @@ def process_render_job(job_id: int) -> None:
         job.status = JobStatus.done
         job.progress = 100
         job.finished_at = datetime.now(timezone.utc)
+        # Phase 36 — persist the per-item failure list so the UI can
+        # show "5/6 ok, 1 failed (reason)" instead of just success.
+        job.failed_assignments = list(failed_assignments)
+        if n_failed > 0:
+            job.error = (
+                f"Batch terminé avec {n_failed}/{total} échecs. "
+                f"Crédits remboursés : {n_failed}."
+            )
         db.commit()
 
     except Exception as e:

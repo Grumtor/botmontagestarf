@@ -144,6 +144,29 @@ async def lifespan(app: FastAPI):
                     )
                 )
             _step("    + users.language added (default 'fr')")
+
+        # Phase 36 — per-item failure list on render jobs so a single
+        # bad input doesn't crash the whole batch.
+        rj_cols2 = {c["name"] for c in inspector.get_columns("render_jobs")}
+        if "failed_assignments" not in rj_cols2:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE render_jobs ADD COLUMN "
+                        "failed_assignments JSON NOT NULL DEFAULT '[]'"
+                    )
+                )
+            _step("    + render_jobs.failed_assignments added")
+
+        # Phase 36 — free-form category tag on templates for filtering
+        # in the templates page + the render wizard.
+        tpl_cols = {c["name"] for c in inspector.get_columns("templates")}
+        if "category" not in tpl_cols:
+            with engine.begin() as conn:
+                conn.execute(
+                    text("ALTER TABLE templates ADD COLUMN category VARCHAR")
+                )
+            _step("    + templates.category added")
         _step("    [OK] migrations OK")
     except Exception as e:
         _step(f"    [FAIL] migrations failed: {e}")

@@ -462,6 +462,9 @@ export const TemplateSchema = z.object({
   id: z.number(),
   name: z.string(),
   description: z.string().nullable(),
+  // Phase 36 — free-form category tag (e.g. "Sport", "Lifestyle", "Tutorial").
+  // null = uncategorised. Used by /templates and the render wizard filters.
+  category: z.string().nullable().optional(),
   language: TemplateLanguageSchema,
   clips: RawClipsSchema,
   // Phase 26b — kept tolerant (z.unknown()) at the schema layer; we
@@ -483,6 +486,7 @@ export const TemplateCreateSchema = z.object({
   name: z.string().min(1).max(200),
   language: TemplateLanguageSchema,
   description: z.string().optional(),
+  category: z.string().max(100).optional(),
 });
 export type TemplateCreateInput = z.infer<typeof TemplateCreateSchema>;
 
@@ -490,6 +494,7 @@ export const TemplateUpdateSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   language: TemplateLanguageSchema.optional(),
   description: z.string().optional(),
+  category: z.string().max(100).nullable().optional(),
   clips: z.array(ClipSchema).optional(),
   // Tolerant on update — server stores raw JSON anyway.
   extra_tracks: z.array(z.unknown()).optional(),
@@ -686,8 +691,21 @@ export const JobSummarySchema = z.object({
   finished_at: z.string().nullable(),
   output_count: z.number(),
   has_zip: z.boolean(),
+  // Phase 36 — number of assignments that failed (0 when none).
+  failed_count: z.number().optional(),
 });
 export type JobSummary = z.infer<typeof JobSummarySchema>;
+
+// Phase 36 — per-item failure record. The backend appends one of
+// these for each render that ffmpeg refused (corrupt input,
+// unsupported codec, etc.). The batch keeps going for the others.
+export const FailedAssignmentSchema = z.object({
+  index: z.number(),
+  template_id: z.number().nullable(),
+  template_name: z.string().nullable(),
+  error: z.string(),
+});
+export type FailedAssignment = z.infer<typeof FailedAssignmentSchema>;
 
 export const JobReadSchema = z.object({
   id: z.number(),
@@ -697,6 +715,7 @@ export const JobReadSchema = z.object({
   metadata_profile: z.record(z.unknown()),
   output_zip_path: z.string().nullable(),
   output_files: z.array(z.string()),
+  failed_assignments: z.array(FailedAssignmentSchema).optional(),
   progress: z.number(),
   error: z.string().nullable(),
   created_at: z.string(),

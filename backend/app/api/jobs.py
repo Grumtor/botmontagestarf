@@ -78,6 +78,8 @@ class JobRead(BaseModel):
     metadata_profile: dict
     output_zip_path: Optional[str]
     output_files: list
+    # Phase 36 — per-item failures (empty when no failure).
+    failed_assignments: list = []
     progress: int
     error: Optional[str]
     created_at: datetime
@@ -95,6 +97,8 @@ class JobSummary(BaseModel):
     finished_at: Optional[datetime]
     output_count: int
     has_zip: bool
+    # Phase 36 — how many assignments failed (0 when none).
+    failed_count: int = 0
 
 
 class DashboardStats(BaseModel):
@@ -227,6 +231,7 @@ def list_jobs(
             finished_at=j.finished_at,
             output_count=len(j.output_files or []),
             has_zip=bool(j.output_zip_path),
+            failed_count=len(j.failed_assignments or []),
         )
         for j in rows
     ]

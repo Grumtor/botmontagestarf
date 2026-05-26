@@ -76,6 +76,8 @@ class TemplateBase(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     language: TemplateLanguage = TemplateLanguage.US
     description: Optional[str] = None
+    # Phase 36 — free-form category tag (per user). Empty / null = none.
+    category: Optional[str] = Field(default=None, max_length=100)
 
 
 class TemplateCreate(TemplateBase):
@@ -86,6 +88,9 @@ class TemplateUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     language: Optional[TemplateLanguage] = None
     description: Optional[str] = None
+    # Phase 36 — category is updatable. `null` clears it ; the FastAPI
+    # exclude_unset pattern below distinguishes "not set" from "set to null".
+    category: Optional[str] = Field(default=None, max_length=100)
     clips: Optional[list] = None
     extra_tracks: Optional[list] = None
     layers: Optional[list] = None
@@ -99,6 +104,7 @@ class TemplateRead(BaseModel):
     name: str
     description: Optional[str]
     language: TemplateLanguage
+    category: Optional[str] = None
     clips: list
     layers: list
     audio_overlay: dict

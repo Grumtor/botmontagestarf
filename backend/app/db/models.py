@@ -116,6 +116,9 @@ class Template(Base):
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Phase 36 — free-form category tag (per user). Used for filtering
+    # in the templates list + the render wizard. null = no category.
+    category: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     language: Mapped[TemplateLanguage] = mapped_column(
         SAEnum(TemplateLanguage, name="template_language"),
         default=TemplateLanguage.US,
@@ -199,6 +202,13 @@ class RenderJob(Base):
     metadata_profile: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     output_zip_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     output_files: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    # Phase 36 — per-item failure breakdown. List of dicts :
+    #   { index, template_id, template_name, error }
+    # Populated as the batch runs ; visible in the UI on the job
+    # detail page. Empty list = no failures (the normal case).
+    failed_assignments: Mapped[list] = mapped_column(
+        JSON, default=list, nullable=False
+    )
     progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
