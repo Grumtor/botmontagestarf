@@ -76,8 +76,11 @@ class TemplateBase(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     language: TemplateLanguage = TemplateLanguage.US
     description: Optional[str] = None
-    # Phase 36 — free-form category tag (per user). Empty / null = none.
-    category: Optional[str] = Field(default=None, max_length=100)
+    # Phase 36b — free-form sub-tags (per user). Multiple per template.
+    # Filter logic on /templates et wizard render = AND (intersection).
+    # Each tag : max 60 chars, no leading/trailing whitespace, no empty
+    # strings (frontend should sanitize ; we re-check here defensively).
+    tags: list[str] = Field(default_factory=list)
 
 
 class TemplateCreate(TemplateBase):
@@ -88,13 +91,38 @@ class TemplateUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     language: Optional[TemplateLanguage] = None
     description: Optional[str] = None
-    # Phase 36 — category is updatable. `null` clears it ; the FastAPI
-    # exclude_unset pattern below distinguishes "not set" from "set to null".
-    category: Optional[str] = Field(default=None, max_length=100)
+    # Phase 36b — full replace of the tag list on update. `[]` clears,
+    # absent = no change (exclude_unset pattern).
+    tags: Optional[list[str]] = None
     clips: Optional[list] = None
     extra_tracks: Optional[list] = None
     layers: Optional[list] = None
     audio_overlay: Optional[dict] = None
+
+
+def _sanitize_tags(tags: Optional[list[str]]) -> list[str]:
+    """Trim, drop empties, dedupe (case-insensitive but keep first-seen casing),
+    cap individual tag length at 60 chars + max 20 tags per template."""
+    if not tags:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in tags:
+        if not isinstance(raw, str):
+            continue
+        t = raw.strip()
+        if not t:
+            continue
+        if len(t) > 60:
+            t = t[:60]
+        key = t.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(t)
+        if len(out) >= 20:
+            break
+    return out
 
 
 class TemplateRead(BaseModel):
@@ -104,7 +132,7 @@ class TemplateRead(BaseModel):
     name: str
     description: Optional[str]
     language: TemplateLanguage
-    category: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
     clips: list
     layers: list
     audio_overlay: dict
@@ -168,6 +196,7 @@ def create_template(
         name=payload.name,
         language=payload.language,
         description=payload.description,
+        tags=_sanitize_tags(payload.tags),
         clips=[],
         extra_tracks=[],
         layers=[],
@@ -214,6 +243,9 @@ def update_template(
 ) -> Template:
     template = _get_owned_template(db, template_id, user)
     for field, value in payload.model_dump(exclude_unset=True).items():
+        if field == "tags":
+            # Sanitize (trim, dedupe case-insensitively, cap at 20 × 60 chars).
+            value = _sanitize_tags(value)
         setattr(template, field, value)
     db.commit()
     db.refresh(template)

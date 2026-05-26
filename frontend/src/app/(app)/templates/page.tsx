@@ -35,9 +35,9 @@ export default function TemplatesPage() {
   const [error, setError] = useState<string | null>(null);
   const [language, setLanguage] = useState<LanguageFilterValue>("ALL");
   const [search, setSearch] = useState("");
-  // Phase 36 — filtre par catégorie. "ALL" = toutes. null = pas de
-  // filtre actif (équivalent ALL).
-  const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
+  // Phase 36b — filtres multi-tags (logique AND). Set vide = pas de
+  // filtre actif. Toggle = click sur un chip ; "Toutes" = clear.
+  const [activeTags, setActiveTags] = useState<Set<string>>(() => new Set());
   const [pendingDelete, setPendingDelete] = useState<Template | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [runRenderTarget, setRunRenderTarget] = useState<Template | null>(null);
@@ -67,14 +67,16 @@ export default function TemplatesPage() {
     void reload();
   }, [reload]);
 
-  // Phase 36 — catégories distinctes triées alpha. Calculée sur la
-  // liste complète (pas la liste filtrée) pour que les chips ne
+  // Phase 36b — tags distincts triés alpha. Calculée sur la liste
+  // complète (pas la liste filtrée) pour que les chips ne
   // disparaissent pas en changeant de langue/search.
-  const categories = useMemo(() => {
+  const allTags = useMemo(() => {
     const set = new Set<string>();
     for (const item of items) {
-      const c = item.category?.trim();
-      if (c) set.add(c);
+      for (const tag of item.tags ?? []) {
+        const trimmed = tag.trim();
+        if (trimmed) set.add(trimmed);
+      }
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [items]);
@@ -83,14 +85,27 @@ export default function TemplatesPage() {
     const term = search.trim().toLowerCase();
     return items.filter((t) => {
       if (language !== "ALL" && t.language !== language) return false;
-      if (categoryFilter !== "ALL") {
-        const c = t.category?.trim() ?? "";
-        if (c !== categoryFilter) return false;
+      if (activeTags.size > 0) {
+        // AND : un template passe seulement si TOUS les tags actifs
+        // sont présents dans ses propres tags.
+        const own = new Set((t.tags ?? []).map((x) => x.trim()));
+        for (const required of activeTags) {
+          if (!own.has(required)) return false;
+        }
       }
       if (term && !t.name.toLowerCase().includes(term)) return false;
       return true;
     });
-  }, [items, language, search, categoryFilter]);
+  }, [items, language, search, activeTags]);
+
+  function toggleTag(tag: string) {
+    setActiveTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  }
 
   async function onCreate(data: TemplateCreateInput) {
     try {
@@ -207,40 +222,44 @@ export default function TemplatesPage() {
         </div>
       </div>
 
-      {/* Phase 36 — barre de filtres par catégorie. Cachée si 0 ou 1
-          catégorie au total (inutile dans ce cas). */}
-      {categories.length >= 2 && (
+      {/* Phase 36b — barre de filtres multi-tags (logique AND). Cachée
+          si 0 ou 1 tag distinct au total (inutile). "Toutes" = clear
+          tous les filtres. */}
+      {allTags.length >= 2 && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="text-muted-foreground">
-            {t("templates.category.filter_label")}
+            {t("templates.tags.filter_label")}
           </span>
           <button
             type="button"
-            onClick={() => setCategoryFilter("ALL")}
+            onClick={() => setActiveTags(new Set())}
             className={
               "rounded-md border px-2.5 py-1 transition " +
-              (categoryFilter === "ALL"
+              (activeTags.size === 0
                 ? "border-primary bg-accent"
                 : "border-border hover:bg-accent/50")
             }
           >
-            {t("templates.category.all")}
+            {t("templates.tags.all")}
           </button>
-          {categories.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setCategoryFilter(c)}
-              className={
-                "rounded-md border px-2.5 py-1 transition " +
-                (categoryFilter === c
-                  ? "border-primary bg-accent"
-                  : "border-border hover:bg-accent/50")
-              }
-            >
-              {c}
-            </button>
-          ))}
+          {allTags.map((tag) => {
+            const on = activeTags.has(tag);
+            return (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => toggleTag(tag)}
+                className={
+                  "rounded-md border px-2.5 py-1 transition " +
+                  (on
+                    ? "border-primary bg-accent"
+                    : "border-border hover:bg-accent/50")
+                }
+              >
+                {tag}
+              </button>
+            );
+          })}
         </div>
       )}
 

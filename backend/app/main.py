@@ -167,6 +167,34 @@ async def lifespan(app: FastAPI):
                     text("ALTER TABLE templates ADD COLUMN category VARCHAR")
                 )
             _step("    + templates.category added")
+
+        # Phase 36b — refactor `category` (single) into `tags` (list).
+        # Adds the column, copies any existing single category into a
+        # 1-element list, then leaves the old column behind for safety
+        # (we'll drop it in a future migration once no callers reference
+        # it). Per-user free-form sub-tags, multi-select with AND filter.
+        tpl_cols = {c["name"] for c in inspector.get_columns("templates")}
+        if "tags" not in tpl_cols:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE templates ADD COLUMN tags JSON NOT NULL "
+                        "DEFAULT '[]'"
+                    )
+                )
+                # Backfill : templates with a non-null `category` become
+                # tags=["<category>"]. SQLite-friendly UPDATE using JSON
+                # function ; works on Postgres too (same syntax for
+                # json_array).
+                conn.execute(
+                    text(
+                        "UPDATE templates SET tags = "
+                        "json_array(category) "
+                        "WHERE category IS NOT NULL AND category != '' "
+                        "AND (tags IS NULL OR tags = '[]')"
+                    )
+                )
+            _step("    + templates.tags added (with backfill from category)")
         _step("    [OK] migrations OK")
     except Exception as e:
         _step(f"    [FAIL] migrations failed: {e}")

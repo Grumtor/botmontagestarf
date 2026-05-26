@@ -462,9 +462,12 @@ export const TemplateSchema = z.object({
   id: z.number(),
   name: z.string(),
   description: z.string().nullable(),
-  // Phase 36 — free-form category tag (e.g. "Sport", "Lifestyle", "Tutorial").
-  // null = uncategorised. Used by /templates and the render wizard filters.
-  category: z.string().nullable().optional(),
+  // Phase 36b — free-form sub-tags ("Captions", "Transition"…), multiple
+  // per template, AND-filtered in the templates list + render wizard.
+  // Defaults to [] for backwards compat with templates created before
+  // the migration (the backend back-fills from the old `category` field
+  // for existing rows).
+  tags: z.array(z.string()).default([]),
   language: TemplateLanguageSchema,
   clips: RawClipsSchema,
   // Phase 26b — kept tolerant (z.unknown()) at the schema layer; we
@@ -486,7 +489,7 @@ export const TemplateCreateSchema = z.object({
   name: z.string().min(1).max(200),
   language: TemplateLanguageSchema,
   description: z.string().optional(),
-  category: z.string().max(100).optional(),
+  tags: z.array(z.string()).optional(),
 });
 export type TemplateCreateInput = z.infer<typeof TemplateCreateSchema>;
 
@@ -494,7 +497,7 @@ export const TemplateUpdateSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   language: TemplateLanguageSchema.optional(),
   description: z.string().optional(),
-  category: z.string().max(100).nullable().optional(),
+  tags: z.array(z.string()).optional(),
   clips: z.array(ClipSchema).optional(),
   // Tolerant on update — server stores raw JSON anyway.
   extra_tracks: z.array(z.unknown()).optional(),

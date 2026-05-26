@@ -143,8 +143,9 @@ export default function RenderWizardPage() {
   // Step 2 — template selection
   const [allTemplates, setAllTemplates] = useState<Template[] | null>(null);
   const [langFilter, setLangFilter] = useState<TemplateLanguage | "ALL">("ALL");
-  // Phase 36 — filtre par catégorie (free-form, "ALL" = toutes).
-  const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
+  // Phase 36b — filtres multi-tags (logique AND). Set vide = pas de
+  // filtre actif.
+  const [activeTags, setActiveTags] = useState<Set<string>>(() => new Set());
   const [mode, setMode] = useState<WizardMode>("all");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   // Per-video → array of template ids. Each (video, template) pair = 1 reel,
@@ -187,27 +188,41 @@ export default function RenderWizardPage() {
     return (allTemplates ?? []).filter((t) => getPlaceholders(t).length > 0);
   }, [allTemplates]);
 
-  // Phase 36 — catégories distinctes dans le pool usable. Triées alpha,
-  // utilisées pour les chips de filtre dans le wizard.
-  const wizardCategories = useMemo(() => {
+  // Phase 36b — tags distincts dans le pool usable. Triés alpha,
+  // utilisés pour les chips de filtre multi-select dans le wizard.
+  const wizardTags = useMemo(() => {
     const set = new Set<string>();
-    for (const t of usableTemplates) {
-      const c = t.category?.trim();
-      if (c) set.add(c);
+    for (const tpl of usableTemplates) {
+      for (const tag of tpl.tags ?? []) {
+        const trimmed = tag.trim();
+        if (trimmed) set.add(trimmed);
+      }
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [usableTemplates]);
 
   const visibleTemplates = useMemo(() => {
-    return usableTemplates.filter((t) => {
-      if (langFilter !== "ALL" && t.language !== langFilter) return false;
-      if (categoryFilter !== "ALL") {
-        const c = t.category?.trim() ?? "";
-        if (c !== categoryFilter) return false;
+    return usableTemplates.filter((tpl) => {
+      if (langFilter !== "ALL" && tpl.language !== langFilter) return false;
+      if (activeTags.size > 0) {
+        // AND : template doit contenir TOUS les tags actifs.
+        const own = new Set((tpl.tags ?? []).map((x) => x.trim()));
+        for (const required of activeTags) {
+          if (!own.has(required)) return false;
+        }
       }
       return true;
     });
-  }, [usableTemplates, langFilter, categoryFilter]);
+  }, [usableTemplates, langFilter, activeTags]);
+
+  function toggleTagFilter(tag: string) {
+    setActiveTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  }
 
   const readyVideos = uploads.filter((u) => u.token);
   const allVideosReady =
@@ -468,9 +483,10 @@ export default function RenderWizardPage() {
             setMode={setMode}
             langFilter={langFilter}
             setLangFilter={setLangFilter}
-            categoryFilter={categoryFilter}
-            setCategoryFilter={setCategoryFilter}
-            categories={wizardCategories}
+            activeTags={activeTags}
+            onToggleTag={toggleTagFilter}
+            onClearTags={() => setActiveTags(new Set())}
+            tags={wizardTags}
             templates={visibleTemplates}
             allTemplatesLoaded={allTemplates !== null}
             selectedIds={selectedIds}
@@ -744,9 +760,10 @@ function Step2Templates({
   setMode,
   langFilter,
   setLangFilter,
-  categoryFilter,
-  setCategoryFilter,
-  categories,
+  activeTags,
+  onToggleTag,
+  onClearTags,
+  tags,
   templates,
   allTemplatesLoaded,
   selectedIds,
@@ -761,9 +778,10 @@ function Step2Templates({
   setMode: (m: WizardMode) => void;
   langFilter: TemplateLanguage | "ALL";
   setLangFilter: (v: TemplateLanguage | "ALL") => void;
-  categoryFilter: string;
-  setCategoryFilter: (v: string) => void;
-  categories: string[];
+  activeTags: Set<string>;
+  onToggleTag: (tag: string) => void;
+  onClearTags: () => void;
+  tags: string[];
   templates: Template[];
   allTemplatesLoaded: boolean;
   selectedIds: Set<number>;
@@ -858,41 +876,44 @@ function Step2Templates({
         </div>
       )}
 
-      {/* Phase 36 — filtre par catégorie. Cachée en mode per_video
-          (l'user voit toutes ses templates par vidéo de toute façon)
-          et si <2 catégories distinctes. */}
-      {mode !== "per_video" && categories.length >= 2 && (
+      {/* Phase 36b — filtres multi-tags (logique AND). Cachée en mode
+          per_video (l'user voit toutes ses templates par vidéo de toute
+          façon) et si <2 tags distincts. "Toutes" = clear. */}
+      {mode !== "per_video" && tags.length >= 2 && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="text-muted-foreground">
-            {t("templates.category.filter_label")}
+            {t("templates.tags.filter_label")}
           </span>
           <button
             type="button"
-            onClick={() => setCategoryFilter("ALL")}
+            onClick={onClearTags}
             className={cn(
               "rounded-md border px-2.5 py-1 transition",
-              categoryFilter === "ALL"
+              activeTags.size === 0
                 ? "border-primary bg-accent"
                 : "border-border hover:bg-accent/50",
             )}
           >
-            {t("templates.category.all")}
+            {t("templates.tags.all")}
           </button>
-          {categories.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setCategoryFilter(c)}
-              className={cn(
-                "rounded-md border px-2.5 py-1 transition",
-                categoryFilter === c
-                  ? "border-primary bg-accent"
-                  : "border-border hover:bg-accent/50",
-              )}
-            >
-              {c}
-            </button>
-          ))}
+          {tags.map((tag) => {
+            const on = activeTags.has(tag);
+            return (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => onToggleTag(tag)}
+                className={cn(
+                  "rounded-md border px-2.5 py-1 transition",
+                  on
+                    ? "border-primary bg-accent"
+                    : "border-border hover:bg-accent/50",
+                )}
+              >
+                {tag}
+              </button>
+            );
+          })}
         </div>
       )}
 

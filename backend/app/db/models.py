@@ -116,9 +116,13 @@ class Template(Base):
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # Phase 36 — free-form category tag (per user). Used for filtering
-    # in the templates list + the render wizard. null = no category.
-    category: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # Phase 36 (refactored) — free-form sub-tags (per user). Replaces the
+    # earlier single `category` field. A template can carry any number
+    # of tags ("Captions", "Transition", "Tutorial"…). Filters on the
+    # templates list + render wizard combine via AND (= intersection).
+    # The high-level language toggle (US/FR) lives in `language` below
+    # and is filtered independently.
+    tags: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     language: Mapped[TemplateLanguage] = mapped_column(
         SAEnum(TemplateLanguage, name="template_language"),
         default=TemplateLanguage.US,

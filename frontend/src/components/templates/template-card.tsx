@@ -305,16 +305,29 @@ export function TemplateCard({
           </div>
         )}
 
-        {/* Phase 36 — chip catégorie en haut à gauche si défini.
-            Hidden quand un overlay (generate / error / spinner) le
-            recouvrirait pour pas faire de superposition moche. */}
-        {template.category && (
-          <span
-            className="pointer-events-none absolute left-2 top-2 z-[2] rounded bg-zinc-700/90 px-2 py-0.5 text-[10px] font-medium text-zinc-200 backdrop-blur"
-            title={template.category}
-          >
-            {template.category}
-          </span>
+        {/* Phase 36b — chips de sous-tags en haut à gauche. Max 3
+            visibles + "+N" pour le surplus. Empty array → rien d'affiché
+            (pas de placeholder ni bordure fantôme). */}
+        {template.tags.length > 0 && (
+          <div className="pointer-events-none absolute left-2 top-2 z-[2] flex flex-wrap gap-1">
+            {template.tags.slice(0, 3).map((tag) => (
+              <span
+                key={tag}
+                className="rounded bg-zinc-700/70 px-1.5 py-0.5 text-[10px] font-medium text-zinc-200 backdrop-blur"
+                title={tag}
+              >
+                {tag}
+              </span>
+            ))}
+            {template.tags.length > 3 && (
+              <span
+                className="rounded bg-zinc-700/70 px-1.5 py-0.5 text-[10px] font-medium text-zinc-200 backdrop-blur"
+                title={template.tags.slice(3).join(", ")}
+              >
+                +{template.tags.length - 3}
+              </span>
+            )}
+          </div>
         )}
 
         {/* Edit / Regen / Duplicate / Delete — always visible (subtle by

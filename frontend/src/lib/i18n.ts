@@ -125,8 +125,8 @@ const fr: Dict = {
   "templates.card.delete": "Delete",
   "templates.card.volume.hint_global": "Volume (utilise le global, slide pour override)",
   "templates.card.volume.hint_override": "Volume override",
-  "templates.category.all": "Toutes",
-  "templates.category.filter_label": "Catégorie :",
+  "templates.tags.all": "Toutes",
+  "templates.tags.filter_label": "Sous-tags :",
 
   // ----- render new / batch -----
   "render.title": "Lancer un render",
@@ -410,8 +410,9 @@ const fr: Dict = {
   "editor.clip.freeze.duration": "Durée du freeze (s)",
   "editor.template.name": "Nom du template",
   "editor.template.language": "Langue cible (FR / US)",
-  "editor.template.category": "Catégorie",
-  "editor.template.category.placeholder": "ex : Sport, Lifestyle, TikTok…",
+  "editor.template.tags": "Sous-tags",
+  "editor.template.tags.placeholder": "Ajouter un sous-tag (Captions, Transition…)",
+  "editor.template.tags.max": "Maximum 20 tags atteint",
 
   // ----- toasts / errors -----
   "toast.saved": "Modifications enregistrées",
@@ -530,8 +531,8 @@ const en: Dict = {
   "templates.card.delete": "Delete",
   "templates.card.volume.hint_global": "Volume (uses global, slide to override)",
   "templates.card.volume.hint_override": "Volume override",
-  "templates.category.all": "All",
-  "templates.category.filter_label": "Category:",
+  "templates.tags.all": "All",
+  "templates.tags.filter_label": "Sub-tags:",
 
   // ----- render new / batch -----
   "render.title": "New render",
@@ -815,8 +816,9 @@ const en: Dict = {
   "editor.clip.freeze.duration": "Freeze duration (s)",
   "editor.template.name": "Template name",
   "editor.template.language": "Target language (FR / US)",
-  "editor.template.category": "Category",
-  "editor.template.category.placeholder": "e.g. Sport, Lifestyle, TikTok…",
+  "editor.template.tags": "Sub-tags",
+  "editor.template.tags.placeholder": "Add a sub-tag (Captions, Transition…)",
+  "editor.template.tags.max": "Maximum 20 tags reached",
 
   // ----- toasts / errors -----
   "toast.saved": "Changes saved",
