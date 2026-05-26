@@ -464,10 +464,12 @@ export const TemplateSchema = z.object({
   description: z.string().nullable(),
   // Phase 36b — free-form sub-tags ("Captions", "Transition"…), multiple
   // per template, AND-filtered in the templates list + render wizard.
-  // Defaults to [] for backwards compat with templates created before
-  // the migration (the backend back-fills from the old `category` field
-  // for existing rows).
-  tags: z.array(z.string()).default([]),
+  // NB : pas de `.default([])` ici parce que zod en fait remonter
+  // `string[] | undefined` dans le type inféré (comme on l'avait vu
+  // sur AdminUserSchema.template_count). Le backend retourne TOUJOURS
+  // la clé (default_factory=list côté Pydantic) donc on peut exiger
+  // le array — les anciens rows DB sont backfilled au boot.
+  tags: z.array(z.string()),
   language: TemplateLanguageSchema,
   clips: RawClipsSchema,
   // Phase 26b — kept tolerant (z.unknown()) at the schema layer; we
