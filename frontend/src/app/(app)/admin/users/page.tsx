@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useT } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
+import { cn, formatCredits } from "@/lib/utils";
 
 type RoleOpt = "admin" | "user";
 type PrioOpt = "high" | "normal" | "low";
@@ -190,7 +190,7 @@ export default function AdminUsersPage() {
                     {u.role === "admin" ? (
                       <span className="text-muted-foreground">∞</span>
                     ) : (
-                      u.render_credits.toLocaleString("fr-FR")
+                      formatCredits(u.render_credits)
                     )}
                   </td>
                   <td className="px-3 py-2 text-center">
@@ -782,7 +782,7 @@ function TopUpDialog({
         <DialogHeader>
           <DialogTitle>{t("admin.topup.title", { name: user.username })}</DialogTitle>
           <DialogDescription>
-            {t("admin.topup.desc.prefix")} <strong>{user.render_credits.toLocaleString("fr-FR")}</strong>{t("admin.topup.desc.suffix")} <strong>{t("admin.topup.desc.additive")}</strong> {t("admin.topup.desc.end")}
+            {t("admin.topup.desc.prefix")} <strong>{formatCredits(user.render_credits)}</strong>{t("admin.topup.desc.suffix")} <strong>{t("admin.topup.desc.additive")}</strong> {t("admin.topup.desc.end")}
           </DialogDescription>
         </DialogHeader>
         <Field label={t("admin.topup.amount_label")}>

@@ -70,6 +70,7 @@ const fr: Dict = {
   "nav.templates": "Templates",
   "nav.tags": "Tags",
   "nav.render": "Lancer un render",
+  "nav.spoof": "Spoofing",
   "nav.photos": "Photos",
   "nav.jobs": "Mes rendus",
   "nav.assets": "Fonts",
@@ -268,8 +269,21 @@ const fr: Dict = {
   "render.dialog.error.placeholder_missing": "Placeholder #{n} : la vidéo {idx} n'est pas uploadée.",
   "render.dialog.error.nothing": "Rien à rendre — vérifie les sélections.",
 
+  // ----- spoof-only wizard (Phase 38) -----
+  "spoof.title": "Spoof de vidéos",
+  "spoof.subtitle": "Applique le spoof iPhone à tes vidéos sans passer par un template. 0.5 crédit par vidéo.",
+  "spoof.step.upload": "Upload",
+  "spoof.step.options": "Options & lancement",
+  "spoof.batch_name": "Nom du batch",
+  "spoof.launch": "Lancer le spoof",
+  "spoof.launching": "Lancement…",
+  "spoof.cost": "{n} vidéos × 0.5 = {total} crédits",
+  "spoof.insufficient_credits": "{missing} crédits manquants",
+  "spoof.empty_upload": "Drop au moins une vidéo pour continuer",
+
   // ----- jobs / render history -----
   "jobs.title": "Mes rendus",
+  "jobs.kind.spoof": "Spoof",
   "jobs.subtitle": "Auto-refresh adaptatif : 3s tant qu'un job tourne, 15s sinon.",
   "jobs.empty": "Aucun job — lance un batch depuis « Lancer un render ».",
   "jobs.zip": "ZIP",
@@ -498,6 +512,7 @@ const en: Dict = {
   "nav.templates": "Templates",
   "nav.tags": "Tags",
   "nav.render": "New render",
+  "nav.spoof": "Spoofing",
   "nav.photos": "Photos",
   "nav.jobs": "My renders",
   "nav.assets": "Fonts",
@@ -696,8 +711,21 @@ const en: Dict = {
   "render.dialog.error.placeholder_missing": "Placeholder #{n}: video {idx} has not been uploaded.",
   "render.dialog.error.nothing": "Nothing to render — check your selections.",
 
+  // ----- spoof-only wizard (Phase 38) -----
+  "spoof.title": "Video spoofing",
+  "spoof.subtitle": "Apply the iPhone spoof to your videos without going through a template. 0.5 credit per video.",
+  "spoof.step.upload": "Upload",
+  "spoof.step.options": "Options & launch",
+  "spoof.batch_name": "Batch name",
+  "spoof.launch": "Launch spoof",
+  "spoof.launching": "Launching…",
+  "spoof.cost": "{n} videos × 0.5 = {total} credits",
+  "spoof.insufficient_credits": "{missing} credits missing",
+  "spoof.empty_upload": "Drop at least one video to continue",
+
   // ----- jobs / render history -----
   "jobs.title": "My renders",
+  "jobs.kind.spoof": "Spoof",
   "jobs.subtitle": "Adaptive auto-refresh: 3s while a job is running, 15s otherwise.",
   "jobs.empty": "No jobs yet — launch a batch from \"New render\".",
   "jobs.zip": "ZIP",

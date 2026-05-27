@@ -86,6 +86,12 @@ export default function JobDetailPage({
           >
             {t(`jobs.status.${job.status}`)}
           </span>
+          {/* Phase 38 — badge "Spoof" pour un job spoof-only (sans render). */}
+          {job.kind === "spoof" && (
+            <span className="rounded bg-purple-700 px-2 py-0.5 text-[10px] font-medium uppercase text-purple-100">
+              {t("jobs.kind.spoof")}
+            </span>
+          )}
           {/* Phase 36 — ZIP available as soon as the path is set,
               EVEN if status=failed (partial success path is ruled out,
               but a done job with some failures still has a ZIP with

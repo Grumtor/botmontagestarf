@@ -12,12 +12,13 @@ import {
   LogOut,
   Rocket,
   ShieldCheck,
+  Sparkles,
   Tag,
 } from "lucide-react";
 import { Auth, type AppLang } from "@/lib/api";
 import { notifyUserRefresh, useCurrentUser } from "@/hooks/use-current-user";
 import { useT } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
+import { cn, formatCredits } from "@/lib/utils";
 
 type Item = {
   href: string;
@@ -28,6 +29,7 @@ type Item = {
 const items: Item[] = [
   { href: "/", labelKey: "nav.dashboard", icon: LayoutDashboard },
   { href: "/render/new", labelKey: "nav.render", icon: Rocket },
+  { href: "/spoof/new", labelKey: "nav.spoof", icon: Sparkles },
   { href: "/templates", labelKey: "nav.templates", icon: Layers },
   { href: "/tags", labelKey: "nav.tags", icon: Tag },
   { href: "/photos", labelKey: "nav.photos", icon: Camera },
@@ -96,7 +98,7 @@ export function Sidebar() {
             <span>
               {me.role === "admin"
                 ? `Admin · ${t("admin.users.unlimited")}`
-                : `${me.render_credits} ${t("nav.credits")}`}
+                : `${formatCredits(me.render_credits)} ${t("nav.credits")}`}
             </span>
             {me.role !== "admin" && me.max_templates != null && (
               <span>

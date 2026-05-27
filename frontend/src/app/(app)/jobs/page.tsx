@@ -100,6 +100,14 @@ export default function JobsPage() {
                   >
                     {t(`jobs.status.${j.status}`)}
                   </span>
+                  {/* Phase 38 — badge "Spoof" pour distinguer un batch
+                      spoofing-only (kind="spoof") d'un batch render
+                      (kind="render", implicite, pas de badge). */}
+                  {j.kind === "spoof" && (
+                    <span className="rounded bg-purple-700 px-2 py-0.5 text-[10px] font-medium uppercase text-purple-100">
+                      {t("jobs.kind.spoof")}
+                    </span>
+                  )}
                 </div>
                 <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
                   <span>

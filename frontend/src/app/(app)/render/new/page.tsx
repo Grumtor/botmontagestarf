@@ -31,10 +31,17 @@ import {
   type PlaceholderClip,
   type Template,
 } from "@/lib/api";
+import {
+  COUNTRIES,
+  COUNTRY_LANG,
+  DEFAULT_MODEL,
+  LANGUAGES,
+  MODELS,
+} from "@/lib/spoof-options";
 import { useTagLibrary } from "@/components/templates/tag-picker-multi";
 import { notifyUserRefresh, useCurrentUser } from "@/hooks/use-current-user";
 import { useT } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
+import { cn, formatCredits } from "@/lib/utils";
 
 // ===== types =========================================================
 
@@ -51,59 +58,11 @@ type WizardMode = "all" | "random" | "per_video";
 
 const ALLOWED_EXTS = [".mp4", ".mov"];
 
-// ===== spoofing constants (mirror RunRenderDialog) ===================
-
-const COUNTRIES = [
-  { value: "USA", label: "USA" },
-  { value: "Canada", label: "Canada" },
-  { value: "France", label: "France" },
-  { value: "UK", label: "UK" },
-  { value: "Spain", label: "Espagne" },
-  { value: "Italy", label: "Italie" },
-  { value: "Germany", label: "Allemagne" },
-  { value: "Mexico", label: "Mexique" },
-  { value: "Brazil", label: "Brésil" },
-  { value: "Australia", label: "Australie" },
-  { value: "Japan", label: "Japon" },
-  { value: "Netherlands", label: "Pays-Bas" },
-];
-const COUNTRY_LANG: Record<string, string> = {
-  USA: "en-US",
-  Canada: "en-CA",
-  France: "fr-FR",
-  UK: "en-GB",
-  Spain: "es-ES",
-  Italy: "it-IT",
-  Germany: "de-DE",
-  Mexico: "es-MX",
-  Brazil: "pt-BR",
-  Australia: "en-AU",
-  Japan: "ja-JP",
-  Netherlands: "nl-NL",
-};
-const MODELS = [
-  "iPhone 16",
-  "iPhone 16 Pro",
-  "iPhone 16 Pro Max",
-  "iPhone 17",
-  "iPhone 17 Pro",
-  "iPhone 17 Pro Max",
-];
-const DEFAULT_MODEL = "iPhone 17";
-const LANGUAGES = [
-  "en-US",
-  "en-CA",
-  "en-GB",
-  "en-AU",
-  "fr-FR",
-  "es-ES",
-  "es-MX",
-  "it-IT",
-  "de-DE",
-  "pt-BR",
-  "ja-JP",
-  "nl-NL",
-];
+// ===== spoofing constants ============================================
+//
+// Phase 38 — extraites dans `@/lib/spoof-options` pour partage avec
+// /spoof/new (qui réutilise les mêmes options sans le pipeline
+// templates). Cf. ce module pour la liste à jour.
 
 // ===== helpers =======================================================
 
@@ -570,13 +529,13 @@ export default function RenderWizardPage() {
               <p className="text-[11px] text-destructive">
                 {creditsShortBy > 1
                   ? t("render.wizard.credits.warning_plural", {
-                      n: creditsShortBy,
-                      avail: me.render_credits,
+                      n: formatCredits(creditsShortBy),
+                      avail: formatCredits(me.render_credits),
                       requested: reelCount,
                     })
                   : t("render.wizard.credits.warning", {
-                      n: creditsShortBy,
-                      avail: me.render_credits,
+                      n: formatCredits(creditsShortBy),
+                      avail: formatCredits(me.render_credits),
                       requested: reelCount,
                     })}
               </p>
