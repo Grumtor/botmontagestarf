@@ -31,6 +31,7 @@ import {
   type PlaceholderClip,
   type Template,
 } from "@/lib/api";
+import { useTagLibrary } from "@/components/templates/tag-picker-multi";
 import { notifyUserRefresh, useCurrentUser } from "@/hooks/use-current-user";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -186,18 +187,29 @@ export default function RenderWizardPage() {
     return (allTemplates ?? []).filter((t) => getPlaceholders(t).length > 0);
   }, [allTemplates]);
 
-  // Phase 36b — tags distincts dans le pool usable. Triés alpha,
-  // utilisés pour les chips de filtre multi-select dans le wizard.
+  // Phase 37c — Source = library `/api/tags` ∪ tags des usableTemplates.
+  // Permet de voir tous les tags déclarés (même ceux pas encore
+  // appliqués) dans la barre de filtres du wizard. Trié alpha
+  // case-insensitive. Cf. /templates page pour la même logique.
+  const libraryNames = useTagLibrary();
   const wizardTags = useMemo(() => {
     const set = new Set<string>();
+    if (libraryNames) {
+      for (const n of libraryNames) {
+        const trimmed = n.trim();
+        if (trimmed) set.add(trimmed);
+      }
+    }
     for (const tpl of usableTemplates) {
       for (const tag of tpl.tags ?? []) {
         const trimmed = tag.trim();
         if (trimmed) set.add(trimmed);
       }
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [usableTemplates]);
+    return Array.from(set).sort((a, b) =>
+      a.toLowerCase().localeCompare(b.toLowerCase()),
+    );
+  }, [usableTemplates, libraryNames]);
 
   const visibleTemplates = useMemo(() => {
     return usableTemplates.filter((tpl) => {
@@ -852,7 +864,7 @@ function Step2Templates({
       {/* Phase 36b — filtres multi-tags (logique AND). Cachée en mode
           per_video (l'user voit toutes ses templates par vidéo de toute
           façon) et si <2 tags distincts. "Toutes" = clear. */}
-      {mode !== "per_video" && tags.length >= 2 && (
+      {mode !== "per_video" && tags.length >= 1 && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="text-muted-foreground">
             {t("templates.tags.filter_label")}

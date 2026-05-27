@@ -66,6 +66,42 @@ function invalidateLibrary() {
   _inflight = null;
 }
 
+/**
+ * Phase 37c — hook public pour lire la library depuis ailleurs (page
+ * /templates filter bar + wizard render step 2) en partageant le cache
+ * module-level. Re-render automatique quand un autre composant crée /
+ * supprime un tag (via le set `_subscribers`).
+ *
+ * Returns an array of tag NAMES sorted alpha (case-insensitive). Null
+ * during the initial fetch — caller should guard.
+ */
+export function useTagLibrary(): string[] | null {
+  const [names, setNames] = useState<string[] | null>(() =>
+    _cache ? _cache.map((t) => t.name) : null,
+  );
+  useEffect(() => {
+    let cancelled = false;
+    const apply = () => {
+      if (cancelled) return;
+      setNames(_cache ? _cache.map((t) => t.name) : null);
+    };
+    _subscribers.add(apply);
+    if (_cache) {
+      apply();
+    } else {
+      void loadLibrary().then(apply).catch(() => {
+        if (!cancelled) setNames([]);
+      });
+    }
+    return () => {
+      cancelled = true;
+      _subscribers.delete(apply);
+    };
+  }, []);
+  if (!names) return null;
+  return [...names].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+}
+
 // ----- component -----------------------------------------------------
 
 type Props = {

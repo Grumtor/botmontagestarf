@@ -17,6 +17,7 @@ import { NewTemplateDialog } from "@/components/templates/new-template-dialog";
 import { RunRenderDialog } from "@/components/templates/run-render-dialog";
 import { SampleVideoDialog } from "@/components/templates/sample-video-dialog";
 import { TemplateCard } from "@/components/templates/template-card";
+import { useTagLibrary } from "@/components/templates/tag-picker-multi";
 import { Templates, type Template, type TemplateCreateInput } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useT } from "@/lib/i18n";
@@ -62,19 +63,33 @@ export default function TemplatesPage() {
     void reload();
   }, [reload]);
 
-  // Phase 36b — tags distincts triés alpha. Calculée sur la liste
-  // complète (pas la liste filtrée) pour que les chips ne
-  // disparaissent pas en changeant de search.
+  // Phase 37c — Source = library `/api/tags` (via le hook partagé qui
+  // share le cache du TagPickerMulti) ∪ tags effectivement présents
+  // dans les templates. Comme ça :
+  //   - Tu crées un tag dans /tags sans l'appliquer encore → visible
+  //     dans le filter bar (utile pour pré-déclarer ses catégories)
+  //   - Si un template a un tag pas encore dans la library (legacy),
+  //     il apparaît quand même dans le filter (rétro-compat)
+  // Trié alpha case-insensitive.
+  const libraryNames = useTagLibrary();
   const allTags = useMemo(() => {
     const set = new Set<string>();
+    if (libraryNames) {
+      for (const n of libraryNames) {
+        const trimmed = n.trim();
+        if (trimmed) set.add(trimmed);
+      }
+    }
     for (const item of items) {
       for (const tag of item.tags ?? []) {
         const trimmed = tag.trim();
         if (trimmed) set.add(trimmed);
       }
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [items]);
+    return Array.from(set).sort((a, b) =>
+      a.toLowerCase().localeCompare(b.toLowerCase()),
+    );
+  }, [items, libraryNames]);
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -218,7 +233,7 @@ export default function TemplatesPage() {
       {/* Phase 36b — barre de filtres multi-tags (logique AND). Cachée
           si 0 ou 1 tag distinct au total (inutile). "Toutes" = clear
           tous les filtres. */}
-      {allTags.length >= 2 && (
+      {allTags.length >= 1 && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="text-muted-foreground">
             {t("templates.tags.filter_label")}
