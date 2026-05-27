@@ -2,17 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Eye, Image as ImageIcon, Redo2, Save, Undo2, X } from "lucide-react";
+import { ArrowLeft, Eye, Image as ImageIcon, Redo2, Save, Undo2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TagPickerMulti } from "@/components/templates/tag-picker-multi";
 import { Render } from "@/lib/api";
 import { useEditorStore } from "@/store/editor";
 import { useT } from "@/lib/i18n";
 import { CoverPickerDialog } from "./cover-picker-dialog";
 import { RenderPreviewDialog } from "./render-preview-dialog";
-
-const MAX_TAGS = 20;
 
 export function EditorTopbar() {
   const router = useRouter();
@@ -20,7 +19,6 @@ export function EditorTopbar() {
   const template = useEditorStore((s) => s.template);
   const clips = useEditorStore((s) => s.clips);
   const patchTemplate = useEditorStore((s) => s.patchTemplate);
-  const setLanguage = useEditorStore((s) => s.setLanguage);
   const saveNow = useEditorStore((s) => s.saveNow);
   const saving = useEditorStore((s) => s.saving);
   const saveError = useEditorStore((s) => s.saveError);
@@ -40,37 +38,6 @@ export function EditorTopbar() {
   // at a chosen timestamp. The frame is ffmpeg-extracted server-side and
   // stored as the template's cover image.
   const [coverOpen, setCoverOpen] = useState(false);
-
-  // Phase 36b — local input for the next tag the user is typing. Tags
-  // themselves live on `template.tags` (persisted via patchTemplate).
-  const [tagInput, setTagInput] = useState("");
-
-  const currentTags = template?.tags ?? [];
-
-  function commitTag() {
-    const raw = tagInput.trim();
-    if (!raw) {
-      setTagInput("");
-      return;
-    }
-    if (currentTags.length >= MAX_TAGS) return;
-    // Case-insensitive dedupe — keep the existing capitalisation.
-    const lower = raw.toLowerCase();
-    const exists = currentTags.some(
-      (existing) => existing.trim().toLowerCase() === lower,
-    );
-    if (exists) {
-      setTagInput("");
-      return;
-    }
-    patchTemplate({ tags: [...currentTags, raw] });
-    setTagInput("");
-  }
-
-  function removeTag(idx: number) {
-    const next = currentTags.filter((_, i) => i !== idx);
-    patchTemplate({ tags: next });
-  }
 
   useEffect(() => {
     return () => {
@@ -102,6 +69,8 @@ export function EditorTopbar() {
   }
 
   if (!template) return null;
+
+  const currentTags = template.tags ?? [];
 
   return (
     <header className="flex h-[50px] shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-3">
@@ -144,72 +113,14 @@ export function EditorTopbar() {
           className="h-8 max-w-xs text-sm"
           aria-label="Nom du template"
         />
-        {/* Phase 36b — Sous-tags libres multiples (Captions, Transition…).
-            L'user push un tag via Entrée / Tab / virgule. Dédupe
-            case-insensitive, cap à 20 (re-validé backend). */}
-        <div
-          className="flex h-8 min-w-[18rem] max-w-[28rem] items-center gap-1 overflow-x-auto rounded-md border border-input bg-transparent px-2 text-sm"
-          aria-label={t("editor.template.tags")}
-          title={t("editor.template.tags")}
-        >
-          {currentTags.map((tag, idx) => (
-            <span
-              key={`${tag}-${idx}`}
-              className="flex shrink-0 items-center gap-1 rounded-full bg-zinc-700 px-2 py-0.5 text-xs text-zinc-200"
-            >
-              {tag}
-              <button
-                type="button"
-                onClick={() => removeTag(idx)}
-                aria-label={`Remove ${tag}`}
-                className="text-zinc-400 transition hover:text-zinc-100"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </span>
-          ))}
-          <input
-            type="text"
-            value={tagInput}
-            onChange={(e) => setTagInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === "Tab" || e.key === ",") {
-                e.preventDefault();
-                commitTag();
-              } else if (
-                e.key === "Backspace" &&
-                tagInput === "" &&
-                currentTags.length > 0
-              ) {
-                // Convenience : empty input + backspace pops the last
-                // tag, like every chip-input people are used to.
-                e.preventDefault();
-                removeTag(currentTags.length - 1);
-              }
-            }}
-            onBlur={commitTag}
-            placeholder={
-              currentTags.length === 0
-                ? t("editor.template.tags.placeholder")
-                : ""
-            }
-            disabled={currentTags.length >= MAX_TAGS}
-            className="min-w-[8rem] flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          />
-        </div>
-        {currentTags.length >= MAX_TAGS && (
-          <span className="text-[10px] text-amber-400">
-            {t("editor.template.tags.max")}
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={() => setLanguage(template.language === "FR" ? "US" : "FR")}
-          className="rounded-md border border-border px-2 py-1 text-xs transition hover:bg-accent"
-          title="Toggle langue"
-        >
-          {template.language === "FR" ? "🇫🇷 FR" : "🇺🇸 US"}
-        </button>
+        {/* Phase 37 — Tags via library partagée (création / sélection
+            multi). Remplace l'ancien input free-form (Phase 36b) +
+            toggle FR/US (legacy). Patch direct → store → autosave. */}
+        <TagPickerMulti
+          compact
+          selectedTags={currentTags}
+          onChange={(next) => patchTemplate({ tags: next })}
+        />
 
         {/* Cover de la card /templates : pioche une frame de l'aperçu
             au timestamp choisi par l'user. */}

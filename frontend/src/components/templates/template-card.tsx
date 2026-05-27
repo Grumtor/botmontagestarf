@@ -18,7 +18,6 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { fr as frLocale } from "date-fns/locale";
 
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Render, type Template } from "@/lib/api";
 import { useT } from "@/lib/i18n";
@@ -73,7 +72,6 @@ export function TemplateCard({
   const playing = currentlyPlayingId === template.id;
   const effectiveVolume = cardVolume ?? globalVolume;
 
-  const langLabel = template.language === "FR" ? "🇫🇷 FR" : "🇺🇸 US";
   const updated = formatDistanceToNow(new Date(template.updated_at), {
     addSuffix: true,
     locale: frLocale,
@@ -379,10 +377,7 @@ export function TemplateCard({
 
       <div className="flex flex-col gap-2 p-3">
         <div className="truncate text-sm font-medium">{template.name}</div>
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <Badge variant="secondary" className="text-[10px]">
-            {langLabel}
-          </Badge>
+        <div className="flex items-center justify-end text-xs text-muted-foreground">
           <span>{updated}</span>
         </div>
         <button

@@ -30,7 +30,6 @@ import {
   Templates,
   type PlaceholderClip,
   type Template,
-  type TemplateLanguage,
 } from "@/lib/api";
 import { notifyUserRefresh, useCurrentUser } from "@/hooks/use-current-user";
 import { useT } from "@/lib/i18n";
@@ -142,7 +141,6 @@ export default function RenderWizardPage() {
 
   // Step 2 — template selection
   const [allTemplates, setAllTemplates] = useState<Template[] | null>(null);
-  const [langFilter, setLangFilter] = useState<TemplateLanguage | "ALL">("ALL");
   // Phase 36b — filtres multi-tags (logique AND). Set vide = pas de
   // filtre actif.
   const [activeTags, setActiveTags] = useState<Set<string>>(() => new Set());
@@ -203,7 +201,6 @@ export default function RenderWizardPage() {
 
   const visibleTemplates = useMemo(() => {
     return usableTemplates.filter((tpl) => {
-      if (langFilter !== "ALL" && tpl.language !== langFilter) return false;
       if (activeTags.size > 0) {
         // AND : template doit contenir TOUS les tags actifs.
         const own = new Set((tpl.tags ?? []).map((x) => x.trim()));
@@ -213,7 +210,7 @@ export default function RenderWizardPage() {
       }
       return true;
     });
-  }, [usableTemplates, langFilter, activeTags]);
+  }, [usableTemplates, activeTags]);
 
   function toggleTagFilter(tag: string) {
     setActiveTags((prev) => {
@@ -481,8 +478,6 @@ export default function RenderWizardPage() {
           <Step2Templates
             mode={mode}
             setMode={setMode}
-            langFilter={langFilter}
-            setLangFilter={setLangFilter}
             activeTags={activeTags}
             onToggleTag={toggleTagFilter}
             onClearTags={() => setActiveTags(new Set())}
@@ -758,8 +753,6 @@ function Step1Upload({
 function Step2Templates({
   mode,
   setMode,
-  langFilter,
-  setLangFilter,
   activeTags,
   onToggleTag,
   onClearTags,
@@ -776,8 +769,6 @@ function Step2Templates({
 }: {
   mode: WizardMode;
   setMode: (m: WizardMode) => void;
-  langFilter: TemplateLanguage | "ALL";
-  setLangFilter: (v: TemplateLanguage | "ALL") => void;
   activeTags: Set<string>;
   onToggleTag: (tag: string) => void;
   onClearTags: () => void;
@@ -831,27 +822,9 @@ function Step2Templates({
         />
       </div>
 
-      {/* Language filter + select-all */}
+      {/* Select-all / clear actions */}
       {mode !== "per_video" && (
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground">{t("render.wizard.language")}</span>
-            {(["ALL", "FR", "US"] as const).map((l) => (
-              <button
-                key={l}
-                type="button"
-                onClick={() => setLangFilter(l)}
-                className={cn(
-                  "rounded-md border px-2.5 py-1 transition",
-                  langFilter === l
-                    ? "border-primary bg-accent"
-                    : "border-border hover:bg-accent/50",
-                )}
-              >
-                {l === "ALL" ? t("common.all") : l === "FR" ? "🇫🇷 FR" : "🇺🇸 US"}
-              </button>
-            ))}
-          </div>
           <div className="ml-auto flex items-center gap-2 text-xs">
             <span className="text-muted-foreground">
               {selectedIds.size > 1
@@ -961,8 +934,6 @@ function Step2Templates({
                 <div className="p-2 text-xs">
                   <div className="truncate font-medium">{tpl.name}</div>
                   <div className="text-muted-foreground">
-                    {tpl.language === "FR" ? "🇫🇷 FR" : "🇺🇸 US"}
-                    {" · "}
                     {placeholderCount > 1
                       ? t("render.wizard.holes_plural", { n: placeholderCount })
                       : t("render.wizard.holes", { n: placeholderCount })}
@@ -1168,10 +1139,7 @@ function PerVideoAssign({
                         : "border-border bg-background/60 hover:border-ring",
                     )}
                   >
-                    {tpl.name}{" "}
-                    <span className="text-[10px] text-muted-foreground">
-                      ({tpl.language})
-                    </span>
+                    {tpl.name}
                   </button>
                 );
               })}

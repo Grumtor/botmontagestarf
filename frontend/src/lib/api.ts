@@ -489,7 +489,10 @@ export type Template = z.infer<typeof TemplateSchema>;
 
 export const TemplateCreateSchema = z.object({
   name: z.string().min(1).max(200),
-  language: TemplateLanguageSchema,
+  // Phase 37 — `language` is legacy : backend still stores it (default
+  // "US" via Pydantic) but we never expose it to the UI anymore. The
+  // user organises templates via `tags` instead.
+  language: TemplateLanguageSchema.optional(),
   description: z.string().optional(),
   tags: z.array(z.string()).optional(),
 });

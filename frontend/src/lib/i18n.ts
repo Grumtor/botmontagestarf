@@ -149,7 +149,11 @@ const fr: Dict = {
   "templates.card.volume.hint_global": "Volume (utilise le global, slide pour override)",
   "templates.card.volume.hint_override": "Volume override",
   "templates.tags.all": "Toutes",
-  "templates.tags.filter_label": "Sous-tags :",
+  "templates.tags.filter_label": "Tags :",
+  "templates.new.tags": "Tags",
+  "tagpicker.add_new": "+ Nouveau tag",
+  "tagpicker.empty": "Aucun tag — gère-les dans /tags",
+  "tagpicker.placeholder": "Choisis des tags…",
 
   // ----- render new / batch -----
   "render.title": "Lancer un render",
@@ -198,7 +202,6 @@ const fr: Dict = {
   "render.wizard.mode.random.subtitle": "Chaque vidéo → 1 template aléatoire",
   "render.wizard.mode.per_video.title": "Per-video",
   "render.wizard.mode.per_video.subtitle": "N templates par vidéo (manuel)",
-  "render.wizard.language": "Langue :",
   "render.wizard.selected": "{n} sélectionné",
   "render.wizard.selected_plural": "{n} sélectionnés",
   "render.wizard.select_all": "Tout sélectionner",
@@ -432,10 +435,6 @@ const fr: Dict = {
   "editor.clip.freeze.position": "Position du freeze (s)",
   "editor.clip.freeze.duration": "Durée du freeze (s)",
   "editor.template.name": "Nom du template",
-  "editor.template.language": "Langue cible (FR / US)",
-  "editor.template.tags": "Sous-tags",
-  "editor.template.tags.placeholder": "Ajouter un sous-tag (Captions, Transition…)",
-  "editor.template.tags.max": "Maximum 20 tags atteint",
 
   // ----- toasts / errors -----
   "toast.saved": "Modifications enregistrées",
@@ -578,7 +577,11 @@ const en: Dict = {
   "templates.card.volume.hint_global": "Volume (uses global, slide to override)",
   "templates.card.volume.hint_override": "Volume override",
   "templates.tags.all": "All",
-  "templates.tags.filter_label": "Sub-tags:",
+  "templates.tags.filter_label": "Tags:",
+  "templates.new.tags": "Tags",
+  "tagpicker.add_new": "+ New tag",
+  "tagpicker.empty": "No tags — manage them in /tags",
+  "tagpicker.placeholder": "Pick tags…",
 
   // ----- render new / batch -----
   "render.title": "New render",
@@ -627,7 +630,6 @@ const en: Dict = {
   "render.wizard.mode.random.subtitle": "Each video → 1 random template",
   "render.wizard.mode.per_video.title": "Per-video",
   "render.wizard.mode.per_video.subtitle": "N templates per video (manual)",
-  "render.wizard.language": "Language:",
   "render.wizard.selected": "{n} selected",
   "render.wizard.selected_plural": "{n} selected",
   "render.wizard.select_all": "Select all",
@@ -861,10 +863,6 @@ const en: Dict = {
   "editor.clip.freeze.position": "Freeze position (s)",
   "editor.clip.freeze.duration": "Freeze duration (s)",
   "editor.template.name": "Template name",
-  "editor.template.language": "Target language (FR / US)",
-  "editor.template.tags": "Sub-tags",
-  "editor.template.tags.placeholder": "Add a sub-tag (Captions, Transition…)",
-  "editor.template.tags.max": "Maximum 20 tags reached",
 
   // ----- toasts / errors -----
   "toast.saved": "Changes saved",

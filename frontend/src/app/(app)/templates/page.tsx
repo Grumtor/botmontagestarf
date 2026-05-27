@@ -13,10 +13,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import {
-  LanguageFilter,
-  type LanguageFilterValue,
-} from "@/components/templates/language-filter";
 import { NewTemplateDialog } from "@/components/templates/new-template-dialog";
 import { RunRenderDialog } from "@/components/templates/run-render-dialog";
 import { SampleVideoDialog } from "@/components/templates/sample-video-dialog";
@@ -33,7 +29,6 @@ export default function TemplatesPage() {
   const [items, setItems] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [language, setLanguage] = useState<LanguageFilterValue>("ALL");
   const [search, setSearch] = useState("");
   // Phase 36b — filtres multi-tags (logique AND). Set vide = pas de
   // filtre actif. Toggle = click sur un chip ; "Toutes" = clear.
@@ -69,7 +64,7 @@ export default function TemplatesPage() {
 
   // Phase 36b — tags distincts triés alpha. Calculée sur la liste
   // complète (pas la liste filtrée) pour que les chips ne
-  // disparaissent pas en changeant de langue/search.
+  // disparaissent pas en changeant de search.
   const allTags = useMemo(() => {
     const set = new Set<string>();
     for (const item of items) {
@@ -84,7 +79,6 @@ export default function TemplatesPage() {
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
     return items.filter((t) => {
-      if (language !== "ALL" && t.language !== language) return false;
       if (activeTags.size > 0) {
         // AND : un template passe seulement si TOUS les tags actifs
         // sont présents dans ses propres tags.
@@ -96,7 +90,7 @@ export default function TemplatesPage() {
       if (term && !t.name.toLowerCase().includes(term)) return false;
       return true;
     });
-  }, [items, language, search, activeTags]);
+  }, [items, search, activeTags]);
 
   function toggleTag(tag: string) {
     setActiveTags((prev) => {
@@ -167,8 +161,7 @@ export default function TemplatesPage() {
         </div>
       </div>
 
-      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <LanguageFilter value={language} onChange={setLanguage} />
+      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-end">
         <div className="flex items-center gap-3">
           {/* Pause globale — n'apparaît que quand un aperçu est en lecture.
               Évite de scroller jusqu'à la card pour la stopper, et de
