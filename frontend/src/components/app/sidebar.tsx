@@ -12,6 +12,7 @@ import {
   LogOut,
   Rocket,
   ShieldCheck,
+  Tag,
 } from "lucide-react";
 import { Auth, type AppLang } from "@/lib/api";
 import { notifyUserRefresh, useCurrentUser } from "@/hooks/use-current-user";
@@ -28,6 +29,7 @@ const items: Item[] = [
   { href: "/", labelKey: "nav.dashboard", icon: LayoutDashboard },
   { href: "/render/new", labelKey: "nav.render", icon: Rocket },
   { href: "/templates", labelKey: "nav.templates", icon: Layers },
+  { href: "/tags", labelKey: "nav.tags", icon: Tag },
   { href: "/photos", labelKey: "nav.photos", icon: Camera },
   { href: "/jobs", labelKey: "nav.jobs", icon: ListTodo },
 ];

@@ -68,6 +68,7 @@ const fr: Dict = {
   // ----- navigation / sidebar -----
   "nav.dashboard": "Dashboard",
   "nav.templates": "Templates",
+  "nav.tags": "Tags",
   "nav.render": "Lancer un render",
   "nav.photos": "Photos",
   "nav.jobs": "Mes rendus",
@@ -77,6 +78,28 @@ const fr: Dict = {
   "nav.language": "Langue",
   "nav.credits": "crédits",
   "nav.templates_count": "templates",
+
+  // ----- tags library page -----
+  "tags.title": "Tags",
+  "tags.subtitle": "Crée, renomme et supprime tes tags. Renommer ou supprimer un tag se propage à tous les templates qui l'utilisent.",
+  "tags.create.title": "Créer un tag",
+  "tags.create.placeholder": "Nom du tag (ex : Captions, Transition, Sport…)",
+  "tags.create.button": "Créer",
+  "tags.list.title": "Mes tags ({n})",
+  "tags.empty": "Aucun tag — crée-en un ci-dessus.",
+  "tags.unused": "Pas utilisé",
+  "tags.usage_count": "{n} template(s)",
+  "tags.rename": "Renommer",
+  "tags.delete": "Supprimer",
+  "tags.created": "Tag « {name} » créé",
+  "tags.create_failed": "Création impossible",
+  "tags.renamed": "« {from} » → « {to} »",
+  "tags.rename_failed": "Renommage impossible",
+  "tags.deleted": "Tag « {name} » supprimé",
+  "tags.delete_failed": "Suppression impossible",
+  "tags.deleted_from_n_templates": "Retiré de {n} template(s)",
+  "tags.delete_confirm": "Supprimer le tag « {name} » ?",
+  "tags.delete_confirm_with_usage": "Supprimer le tag « {name} » ? Il est utilisé dans {n} template(s) — il sera retiré partout.",
 
   // ----- login -----
   "login.title": "Connexion",
@@ -474,6 +497,7 @@ const en: Dict = {
   // ----- navigation / sidebar -----
   "nav.dashboard": "Dashboard",
   "nav.templates": "Templates",
+  "nav.tags": "Tags",
   "nav.render": "New render",
   "nav.photos": "Photos",
   "nav.jobs": "My renders",
@@ -483,6 +507,28 @@ const en: Dict = {
   "nav.language": "Language",
   "nav.credits": "credits",
   "nav.templates_count": "templates",
+
+  // ----- tags library page -----
+  "tags.title": "Tags",
+  "tags.subtitle": "Create, rename and delete your tags. Renaming or deleting a tag propagates to every template that uses it.",
+  "tags.create.title": "Create a tag",
+  "tags.create.placeholder": "Tag name (e.g. Captions, Transition, Sport…)",
+  "tags.create.button": "Create",
+  "tags.list.title": "My tags ({n})",
+  "tags.empty": "No tags yet — create one above.",
+  "tags.unused": "Unused",
+  "tags.usage_count": "{n} template(s)",
+  "tags.rename": "Rename",
+  "tags.delete": "Delete",
+  "tags.created": "Tag \"{name}\" created",
+  "tags.create_failed": "Create failed",
+  "tags.renamed": "\"{from}\" → \"{to}\"",
+  "tags.rename_failed": "Rename failed",
+  "tags.deleted": "Tag \"{name}\" deleted",
+  "tags.delete_failed": "Delete failed",
+  "tags.deleted_from_n_templates": "Removed from {n} template(s)",
+  "tags.delete_confirm": "Delete the tag \"{name}\"?",
+  "tags.delete_confirm_with_usage": "Delete the tag \"{name}\"? It's used in {n} template(s) — it'll be removed everywhere.",
 
   // ----- login -----
   "login.title": "Sign in",

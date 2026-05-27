@@ -528,6 +528,35 @@ const CoverResponseSchema = z.object({
 });
 export type CoverResponse = z.infer<typeof CoverResponseSchema>;
 
+// ===== Phase 37 — Tag library =======================================
+
+export const TagSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  usage_count: z.number(),
+});
+export type Tag = z.infer<typeof TagSchema>;
+
+export const Tags = {
+  list: () => request(z.array(TagSchema), "/api/tags"),
+  create: (name: string) =>
+    request(TagSchema, "/api/tags", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  rename: (id: number, name: string) =>
+    request(TagSchema, `/api/tags/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
+  delete: (id: number) =>
+    request(
+      z.object({ ok: z.boolean(), templates_touched: z.number() }),
+      `/api/tags/${id}`,
+      { method: "DELETE" },
+    ),
+};
+
 export const Templates = {
   list: (language?: TemplateLanguage) => {
     const qs = language ? `?language=${language}` : "";

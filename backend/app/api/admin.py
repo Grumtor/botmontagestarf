@@ -185,6 +185,19 @@ def create_user(
         db.rollback()
         raise HTTPException(409, f"Username {payload.username!r} déjà utilisé")
     db.refresh(user)
+
+    # Phase 37 — seed le nouvel user avec les 2 tags par défaut "FR"
+    # et "US" dans sa library. Évite que sa page /tags soit vide à
+    # la 1ère connexion. Il peut les renommer / supprimer librement.
+    from app.db.models import Tag as _Tag
+    for name in ("FR", "US"):
+        db.add(_Tag(owner_id=user.id, name=name))
+    try:
+        db.commit()
+    except Exception:
+        log.exception("Failed to seed default tags for new user %s", user.id)
+        db.rollback()
+
     return _summarize(db, user)
 
 

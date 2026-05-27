@@ -31,6 +31,7 @@ from app.api.photos import router as photos_router
 from app.api.render import router as render_router
 from app.api.sample_video import router as sample_video_router
 from app.api.admin import router as admin_router
+from app.api.tags import router as tags_router
 from app.api.templates import router as templates_router
 from app.auth import COOKIE_NAME, auth_enabled, verify_session_token
 from app.config import settings
@@ -195,6 +196,13 @@ async def lifespan(app: FastAPI):
                     )
                 )
             _step("    + templates.tags added (with backfill from category)")
+
+        # Phase 37 — tag library table. The DB table is auto-created by
+        # Base.metadata.create_all on first boot, but we still want to
+        # seed existing users with default "FR" / "US" tags so they see
+        # something in the new /tags page right away. The seed itself
+        # happens in step 3b (bootstrap_default_tags) since it needs
+        # the User table to exist + at least one user.
         _step("    [OK] migrations OK")
     except Exception as e:
         _step(f"    [FAIL] migrations failed: {e}")
@@ -253,6 +261,32 @@ async def lifespan(app: FastAPI):
                     )
             else:
                 _step(f"    [OK] {n_users} user(s) already present")
+
+            # Phase 37 — seed default tags ("FR" / "US") for every user
+            # that doesn't have any in their library yet. Idempotent : we
+            # only insert if the user has zero tags. Includes existing
+            # users (the admin + any pre-Phase-37 users) AND future ones
+            # since this hook runs on every boot.
+            from app.db.models import Tag as _Tag
+            DEFAULT_TAGS = ["FR", "US"]
+            tag_seed_count = 0
+            for u in db.execute(select(User)).scalars():
+                n_tags = db.scalar(
+                    select(sa_func.count())
+                    .select_from(_Tag)
+                    .where(_Tag.owner_id == u.id)
+                )
+                if (n_tags or 0) > 0:
+                    continue
+                for name in DEFAULT_TAGS:
+                    db.add(_Tag(owner_id=u.id, name=name))
+                    tag_seed_count += 1
+            if tag_seed_count > 0:
+                db.commit()
+                _step(
+                    f"    + {tag_seed_count} default tags seeded "
+                    f"(FR/US for users with empty libraries)"
+                )
     except Exception as e:
         _step(f"    [FAIL] bootstrap admin failed: {e}")
         log.exception("bootstrap admin failed: %s", e)
@@ -389,6 +423,7 @@ app.include_router(jobs_router)
 app.include_router(photos_router)
 app.include_router(sample_video_router)
 app.include_router(admin_router)
+app.include_router(tags_router)         # /api/tags/* — Phase 37
 
 
 @app.get("/api/health")

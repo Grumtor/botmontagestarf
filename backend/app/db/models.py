@@ -79,6 +79,34 @@ class TemplateLanguage(str, enum.Enum):
     US = "US"
 
 
+class Tag(Base):
+    """Phase 37 — User's tag library. A tag is just a free-form name
+    owned by a user. Templates carry an array of tag NAMES (string-keyed,
+    not FK-keyed) so applying/removing a tag on a template is a simple
+    JSON array mutation, no junction table needed.
+
+    The library exists alongside this : it lets the user declare a tag
+    BEFORE applying it to any template (so they can plan ahead), and it's
+    the source of truth for rename/delete-with-propagation operations.
+    """
+
+    __tablename__ = "tags"
+    __table_args__ = (
+        # Per-user uniqueness on name. Case-sensitive at the DB layer ;
+        # higher-level code (api/tags.py) dedupes case-insensitively.
+        # Composite unique index, not UniqueConstraint, for SQLite compat.
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class AssetType(str, enum.Enum):
     """Only `font` is used in the new model. Other values are kept for
     historical reasons (existing rows in the DB) but no new uploads accept
