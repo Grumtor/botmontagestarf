@@ -31,6 +31,7 @@ from app.api.photos import router as photos_router
 from app.api.render import router as render_router
 from app.api.sample_video import router as sample_video_router
 from app.api.admin import router as admin_router
+from app.api.spoof import router as spoof_router
 from app.api.tags import router as tags_router
 from app.api.templates import router as templates_router
 from app.auth import COOKIE_NAME, auth_enabled, verify_session_token
@@ -203,6 +204,28 @@ async def lifespan(app: FastAPI):
         # something in the new /tags page right away. The seed itself
         # happens in step 3b (bootstrap_default_tags) since it needs
         # the User table to exist + at least one user.
+
+        # Phase 38 — render_jobs.kind ("render" | "spoof") so spoof-only
+        # batches reuse the RenderJob row without a separate table.
+        rj_cols3 = {c["name"] for c in inspector.get_columns("render_jobs")}
+        if "kind" not in rj_cols3:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE render_jobs ADD COLUMN kind VARCHAR "
+                        "NOT NULL DEFAULT 'render'"
+                    )
+                )
+            _step("    + render_jobs.kind added (default 'render')")
+
+        # Phase 38 — users.render_credits Integer → Float (0.5 unit
+        # granularity for spoof-only jobs). SQLite stores numbers
+        # dynamically so existing INTEGER values keep working ; we
+        # don't bother with an ALTER TABLE here (SQLite would copy the
+        # whole table). On Postgres you'd need a real ALTER COLUMN
+        # TYPE — TBD when/if we migrate. Just relying on dynamic typing
+        # for SQLite + the new SQLAlchemy Float type which will read
+        # values as float() going forward.
         _step("    [OK] migrations OK")
     except Exception as e:
         _step(f"    [FAIL] migrations failed: {e}")
@@ -424,6 +447,7 @@ app.include_router(photos_router)
 app.include_router(sample_video_router)
 app.include_router(admin_router)
 app.include_router(tags_router)         # /api/tags/* — Phase 37
+app.include_router(spoof_router)        # /api/spoof/* — Phase 38
 
 
 @app.get("/api/health")

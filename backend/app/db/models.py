@@ -55,9 +55,10 @@ class User(Base):
     # null = unlimited (admin default). For regular users, the admin
     # sets a cap at creation time and may bump it later.
     max_templates: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    # 1 credit = 1 reel généré. Decremented when a batch is queued.
-    # Admin tops up manually via /admin/users.
-    render_credits: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # 1 credit = 1 reel généré, 0.5 credit = 1 vidéo spoofée seule.
+    # Decremented when a batch is queued. Admin tops up via /admin/users.
+    # Phase 38 — Float to allow 0.5 increments for spoof-only jobs.
+    render_credits: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Phase 35 — UI language. "fr" or "en". Per-user setting, synced
     # across devices since it lives in the DB (the user picks it once
@@ -229,7 +230,14 @@ class RenderJob(Base):
         default=JobStatus.queued,
         nullable=False,
     )
-    # Each entry: { template_id, fills: {clip_id: token} }
+    # Phase 38 — kind = "render" (template-based batch, the historical
+    # default, costs 1 credit per output) OR "spoof" (just apply
+    # QuickTime metadata + Apple-style naming to user-uploaded
+    # videos, costs 0.5 credit per video, no template involved).
+    # Free-form string for future-proofing rather than an enum.
+    kind: Mapped[str] = mapped_column(String, default="render", nullable=False)
+    # Each entry: { template_id, fills: {clip_id: token} } for render,
+    # OR { token, gen_idx } for spoof.
     assignments: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     metadata_profile: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     output_zip_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)

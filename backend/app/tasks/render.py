@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import random
 import re
+import shutil
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -68,6 +69,20 @@ def process_render_job(job_id: int) -> None:
         metadata_profile = dict(job.metadata_profile or {})
         spoof_enabled = bool(metadata_profile.get("enabled"))
 
+        # Phase 38 — kind=spoof means we bypass the full ffmpeg pipeline
+        # (no template, no clips, no encoding) and just copy each
+        # uploaded video to the output dir + apply the metadata spoof.
+        # The cost-per-failure used for refund logic differs too :
+        # 0.5 credit per spoofed video vs 1 credit per rendered reel.
+        job_kind = (job.kind or "render").lower()
+        is_spoof = job_kind == "spoof"
+        cost_per_item = 0.5 if is_spoof else 1.0
+        # When kind=spoof we ALWAYS apply the metadata pass regardless
+        # of the flag (the endpoint guarantees enabled=True but be
+        # defensive).
+        if is_spoof:
+            spoof_enabled = True
+
         out_dir = RENDERS_DIR / str(job.id)
         out_dir.mkdir(parents=True, exist_ok=True)
         output_files: list[str] = []
@@ -89,11 +104,89 @@ def process_render_job(job_id: int) -> None:
         failed_assignments: list[dict] = []
 
         for i, assign in enumerate(assignments):
-            template_id = assign.get("template_id")
-            fills = dict(assign.get("fills") or {})
             gen_idx = int(assign.get("_gen") or 1)
             if gen_idx > max_gen:
                 max_gen = gen_idx
+
+            # ---- Spoof-only path (Phase 38) -----
+            # Pas de template, juste un token de upload. On copie le
+            # fichier dans le out_dir puis on applique le spoof.
+            if is_spoof:
+                token = assign.get("token")
+                source_path: Path | None = None
+                if token:
+                    for p in TEMP_DIR.glob(f"{token}.*"):
+                        source_path = p
+                        break
+                if source_path is None or not source_path.is_file():
+                    log.warning(
+                        "Spoof job %s : token %s introuvable, skip",
+                        job.id, token,
+                    )
+                    failed_assignments.append({
+                        "index": i,
+                        "template_id": None,
+                        "template_name": None,
+                        "error": f"Vidéo source introuvable (token {token})",
+                    })
+                    if token:
+                        consumed_tokens.add(token)
+                    job.progress = int((i + 1) / total * 100)
+                    job.failed_assignments = list(failed_assignments)
+                    db.commit()
+                    continue
+
+                # On garde l'extension d'origine (mp4 / mov) — la
+                # metadata spoof + le naming Apple s'occupent du reste
+                # plus bas.
+                ext = source_path.suffix.lower() or ".mp4"
+                file_name = f"spoof_{i}{ext}"
+                output_path = out_dir / file_name
+                try:
+                    shutil.copyfile(source_path, output_path)
+                except Exception as e:
+                    log.exception(
+                        "Spoof copy failed for token %s: %s", token, e,
+                    )
+                    failed_assignments.append({
+                        "index": i,
+                        "template_id": None,
+                        "template_name": None,
+                        "error": f"Copie échouée : {e}",
+                    })
+                    consumed_tokens.add(token)
+                    try:
+                        output_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    job.progress = int((i + 1) / total * 100)
+                    job.failed_assignments = list(failed_assignments)
+                    db.commit()
+                    continue
+
+                # Apply spoof metadata (toujours, peu importe le flag
+                # — c'est le point de l'endpoint /api/spoof/batch).
+                try:
+                    apply_quicktime_metadata(output_path, metadata_profile)
+                except Exception as e:
+                    log.exception(
+                        "Spoof metadata apply failed for %s: %s",
+                        output_path, e,
+                    )
+                    # Pas un fail bloquant — on garde le fichier copié
+                    # mais sans le spoof. Logué pour debug.
+
+                consumed_tokens.add(token)
+                output_files.append(str(output_path))
+                output_entries.append((str(output_path), gen_idx, i))
+                job.output_files = list(output_files)
+                job.progress = int((i + 1) / total * 100)
+                db.commit()
+                continue
+
+            # ---- Normal render path (template-based) -----
+            template_id = assign.get("template_id")
+            fills = dict(assign.get("fills") or {})
 
             template = db.get(Template, template_id)
             if template is None:
@@ -175,20 +268,24 @@ def process_render_job(job_id: int) -> None:
             job.progress = int((i + 1) / total * 100)
             db.commit()
 
-        # Phase 36 — refund credits for failed assignments. The user
-        # was charged 1 credit per assignment at create_batch time ;
-        # we give back 1 per failure so they're only billed for actual
-        # successful renders.
+        # Phase 36 / 38 — refund credits for failed assignments. The
+        # user was charged `cost_per_item` per assignment at the create
+        # endpoint (1.0 for render, 0.5 for spoof) ; we give back the
+        # same amount per failure so they're only billed for the items
+        # that actually produced an output.
         n_failed = len(failed_assignments)
         if n_failed > 0 and job.owner_id:
             try:
                 u = db.get(User, job.owner_id)
                 if u is not None:
-                    u.render_credits = (u.render_credits or 0) + n_failed
+                    refund = n_failed * cost_per_item
+                    u.render_credits = (u.render_credits or 0.0) + refund
                     db.commit()
                     log.info(
-                        "Refunded %d credits to user %s for failed assignments in job %s",
-                        n_failed, u.username, job.id,
+                        "Refunded %g credits (%d × %g) to user %s for failed "
+                        "assignments in job %s (kind=%s)",
+                        refund, n_failed, cost_per_item, u.username,
+                        job.id, job_kind,
                     )
             except Exception:
                 log.exception("Failed to refund credits for job %s", job.id)

@@ -74,6 +74,8 @@ class JobRead(BaseModel):
     id: int
     name: str
     status: JobStatus
+    # Phase 38 — "render" (template-based) or "spoof" (metadata-only).
+    kind: str = "render"
     assignments: list
     metadata_profile: dict
     output_zip_path: Optional[str]
@@ -92,6 +94,8 @@ class JobSummary(BaseModel):
     id: int
     name: str
     status: JobStatus
+    # Phase 38 — kind = "render" | "spoof", surfaced as a badge on /jobs.
+    kind: str = "render"
     progress: int
     created_at: datetime
     finished_at: Optional[datetime]
@@ -226,6 +230,7 @@ def list_jobs(
             id=j.id,
             name=j.name,
             status=j.status,
+            kind=(j.kind or "render"),
             progress=j.progress,
             created_at=j.created_at,
             finished_at=j.finished_at,

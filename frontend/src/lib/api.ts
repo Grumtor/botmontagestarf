@@ -723,6 +723,8 @@ export const JobSummarySchema = z.object({
   id: z.number(),
   name: z.string(),
   status: JobStatusSchema,
+  // Phase 38 — "render" (template-based batch) or "spoof" (metadata-only).
+  kind: z.string().optional(),
   progress: z.number(),
   created_at: z.string(),
   finished_at: z.string().nullable(),
@@ -748,6 +750,8 @@ export const JobReadSchema = z.object({
   id: z.number(),
   name: z.string(),
   status: JobStatusSchema,
+  // Phase 38 — "render" (full template-based) or "spoof" (metadata-only).
+  kind: z.string().optional(),
   assignments: z.array(z.unknown()),
   metadata_profile: z.record(z.unknown()),
   output_zip_path: z.string().nullable(),
@@ -769,6 +773,39 @@ export type DashboardStats = z.infer<typeof DashboardStatsSchema>;
 export const Jobs = {
   list: () => request(z.array(JobSummarySchema), "/api/jobs"),
   get: (id: number) => request(JobReadSchema, `/api/jobs/${id}`),
+};
+
+// ===== Phase 38 — Spoof-only batches ===============================
+//
+// 0.5 credit / video. Reuses the same upload endpoint (POST
+// /api/render/upload → returns a token) then posts the list of
+// tokens here. The backend creates a RenderJob with kind="spoof"
+// that the worker handles separately (no template, no ffmpeg
+// encode — just copy + apply quicktime metadata + ZIP).
+
+export type SpoofBatchInput = {
+  name: string;
+  tokens: string[];
+  metadata_profile: {
+    enabled?: boolean;
+    model?: string;
+    country?: string;
+    language?: string;
+    date_window_days?: number;
+  };
+  naming?: "default" | "iphone";
+  pass_label?: string;
+};
+
+export const Spoof = {
+  /** Cost in credits per video. Mirror of the backend constant. */
+  COST_PER_VIDEO: 0.5,
+  /** POST /api/spoof/batch — creates a kind=spoof RenderJob. */
+  batch: (data: SpoofBatchInput) =>
+    request(JobReadSchema, "/api/spoof/batch", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 };
 
 export const Dashboard = {
