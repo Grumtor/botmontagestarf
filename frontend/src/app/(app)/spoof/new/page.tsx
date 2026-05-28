@@ -59,6 +59,11 @@ type Pending = {
   progress: number;
   token: string | null;
   error: string | null;
+  // Phase 38b — when the upload is retried (network blip), this holds
+  // the current attempt number (2 or 3). Affiché à côté de la barre
+  // de progression pour informer l'user qu'on retente plutôt que
+  // d'afficher un échec définitif tout de suite.
+  retryAttempt?: number;
 };
 
 const ALLOWED_EXTS = [".mp4", ".mov"];
@@ -144,13 +149,29 @@ export default function SpoofWizardPage() {
     await Promise.all(
       additions.map(async (p, i) => {
         try {
-          const res = await Render.uploadUserVideo(allowed[i], (pct) => {
-            patchPending(p.id, { progress: pct });
+          const res = await Render.uploadUserVideo(
+            allowed[i],
+            (pct) => {
+              patchPending(p.id, { progress: pct });
+            },
+            (attempt) => {
+              // Phase 38b — retry auto sur blip réseau (Cloudflare
+              // Tunnel + lent réseau peut faire fail 1 upload sur 20).
+              // 3 tentatives avec backoff exponentiel ; on affiche le
+              // numéro de tentative à l'user pour qu'il sache qu'on
+              // retente plutôt que de croire que c'est cassé.
+              patchPending(p.id, { retryAttempt: attempt, progress: 0 });
+            },
+          );
+          patchPending(p.id, {
+            token: res.token,
+            progress: 100,
+            retryAttempt: undefined,
           });
-          patchPending(p.id, { token: res.token, progress: 100 });
         } catch (err) {
           patchPending(p.id, {
             error: err instanceof Error ? err.message : "Erreur",
+            retryAttempt: undefined,
           });
         }
       }),
@@ -437,7 +458,14 @@ function Step1Upload({
                     {t("render.wizard.upload.video_ready")}
                   </span>
                 ) : (
-                  <Progress value={u.progress} className="w-32" />
+                  <div className="flex items-center gap-2">
+                    {u.retryAttempt && (
+                      <span className="text-xs text-amber-400">
+                        {t("upload.retrying", { n: u.retryAttempt })}
+                      </span>
+                    )}
+                    <Progress value={u.progress} className="w-32" />
+                  </div>
                 )}
                 <button
                   type="button"

@@ -52,6 +52,10 @@ type Pending = {
   progress: number;
   token: string | null;
   error: string | null;
+  // Phase 38b — current retry attempt (2 or 3) when an upload blip
+  // is being re-tried automatically. Displayed inline so the user
+  // doesn't see a misleading "failed" state for a transient error.
+  retryAttempt?: number;
 };
 
 type WizardMode = "all" | "random" | "per_video";
@@ -263,13 +267,26 @@ export default function RenderWizardPage() {
     await Promise.all(
       additions.map(async (p, i) => {
         try {
-          const res = await Render.uploadUserVideo(allowed[i], (pct) => {
-            patchPending(p.id, { progress: pct });
+          const res = await Render.uploadUserVideo(
+            allowed[i],
+            (pct) => {
+              patchPending(p.id, { progress: pct });
+            },
+            (attempt) => {
+              // Phase 38b — retry auto sur blip réseau ; affiche
+              // "Tentative N/3" pendant le retry pour rassurer l'user.
+              patchPending(p.id, { retryAttempt: attempt, progress: 0 });
+            },
+          );
+          patchPending(p.id, {
+            token: res.token,
+            progress: 100,
+            retryAttempt: undefined,
           });
-          patchPending(p.id, { token: res.token, progress: 100 });
         } catch (err) {
           patchPending(p.id, {
             error: err instanceof Error ? err.message : "Erreur",
+            retryAttempt: undefined,
           });
         }
       }),
@@ -700,7 +717,14 @@ function Step1Upload({
                 ) : u.token ? (
                   <span className="text-xs text-emerald-400">{t("render.wizard.upload.video_ready")}</span>
                 ) : (
-                  <Progress value={u.progress} className="w-32" />
+                  <div className="flex items-center gap-2">
+                    {u.retryAttempt && (
+                      <span className="text-xs text-amber-400">
+                        {t("upload.retrying", { n: u.retryAttempt })}
+                      </span>
+                    )}
+                    <Progress value={u.progress} className="w-32" />
+                  </div>
                 )}
                 <button
                   type="button"

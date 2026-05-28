@@ -640,12 +640,14 @@ export const Render = {
   uploadUserVideo: async (
     file: File,
     onProgress?: (pct: number) => void,
+    onRetry?: (attempt: number, lastError: Error) => void,
   ): Promise<{ token: string }> =>
-    multipartUpload(
+    multipartUploadWithRetry(
       "/api/render/upload",
       file,
       RenderUploadResponseSchema,
       onProgress,
+      onRetry,
     ),
 
   preview: async (
@@ -937,6 +939,61 @@ export const Photos = {
 };
 
 // ===== multipart upload helper (XHR for progress) ====================
+
+/**
+ * Phase 38b — wrapper de `multipartUpload` avec retry automatique.
+ *
+ * Cloudflare Tunnel + lent réseau de l'utilisateur final → environ 1
+ * upload sur 20 fail aléatoirement (network blip, TLS handshake qui
+ * timeout, etc.) sur des fichiers pourtant en dessous de la limite
+ * 100 MB du tunnel. Un retry suffit dans 99% des cas.
+ *
+ * Logique :
+ *   - 3 tentatives max
+ *   - Backoff exponentiel : 1s, 2s, 4s entre les tentatives
+ *   - NE retry PAS sur les erreurs 4xx (auth, validation, payload trop
+ *     gros côté backend) — ça ne marchera jamais. On retry uniquement
+ *     les erreurs réseau (status 0) ou 5xx (serveur).
+ *   - À chaque retry, on reset `onProgress(0)` pour que l'UI reflète
+ *     bien le nouveau démarrage.
+ *   - Optionally appelle `onRetry(attempt)` pour que l'UI puisse
+ *     afficher "Tentative 2/3" ou similaire.
+ */
+async function multipartUploadWithRetry<T>(
+  url: string,
+  file: File,
+  schema: z.ZodType<T>,
+  onProgress?: (pct: number) => void,
+  onRetry?: (attempt: number, lastError: Error) => void,
+  fieldName: string = "file",
+  maxAttempts: number = 3,
+): Promise<T> {
+  let lastErr: Error = new Error("upload never attempted");
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      if (attempt > 1 && onProgress) onProgress(0);
+      return await multipartUpload(url, file, schema, onProgress, fieldName);
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err));
+      // Don't retry client errors — they won't fix themselves.
+      if (
+        err instanceof ApiError &&
+        err.status >= 400 &&
+        err.status < 500
+      ) {
+        throw err;
+      }
+      // Last attempt → propagate the error.
+      if (attempt >= maxAttempts) break;
+      // Notify caller so UI can show "Tentative N/3".
+      if (onRetry) onRetry(attempt + 1, lastErr);
+      // Backoff : 1s, 2s, 4s.
+      const delayMs = 1000 * Math.pow(2, attempt - 1);
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
+}
 
 function multipartUpload<T>(
   url: string,
