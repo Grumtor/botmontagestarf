@@ -23,7 +23,11 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
 
     # Worker concurrency for the in-process render queue.
-    render_workers: int = 1
+    # Phase 39 — bump 1 → 2. ffmpeg sature un CPU par render mais le
+    # VPS en a 4+ et l'API a besoin de respirer. 2 = 2 renders en
+    # parallèle, 3 si la dernière instance OS/process est dispo
+    # mais en pratique 2 suffit pour les batches typiques.
+    render_workers: int = 2
 
     # ----- Auth (Phase 30) ------------------------------------------
     # Argon2id hash of the master password. Generate via

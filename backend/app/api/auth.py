@@ -45,7 +45,10 @@ class UserOut(BaseModel):
     role: str
     priority: str
     max_templates: int | None
-    render_credits: int
+    # Phase 39 — Float depuis Phase 38 (0.5 crédit/spoof). Avant : int
+    # qui tronquait les .5 → sidebar affichait 12 alors que la DB
+    # avait 12.5 et le user pensait avoir moins de crédits.
+    render_credits: float
     is_active: bool
     language: str
 

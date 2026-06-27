@@ -171,6 +171,20 @@ def create_batch(
             f"Templates inconnus ou pas les tiens : {sorted(missing)}",
         )
 
+    # Phase 39 — anti cross-tenant : chaque token d'upload doit avoir
+    # été créé par CET user (préfixe `u{user.id}_` sur le token, posé
+    # par /api/render/upload). Un user A qui essaie d'utiliser un
+    # token de user B se voit refuser ici.
+    user_prefix = f"u{user.id}_"
+    for a in payload.assignments:
+        for tok in (a.fills or {}).values():
+            if not isinstance(tok, str) or not tok.startswith(user_prefix):
+                raise HTTPException(
+                    400,
+                    "Token d'upload invalide (pas le tien ou expiré). "
+                    "Re-upload tes vidéos.",
+                )
+
     # Phase 33 — per-user render credits. 1 credit = 1 reel.
     # Admin has effectively unlimited credits (10^9 at bootstrap).
     cost = len(expanded_assignments)

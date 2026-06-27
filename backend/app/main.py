@@ -226,6 +226,22 @@ async def lifespan(app: FastAPI):
         # TYPE — TBD when/if we migrate. Just relying on dynamic typing
         # for SQLite + the new SQLAlchemy Float type which will read
         # values as float() going forward.
+
+        # Phase 39 — indexes sur colonnes utilisées en filter/sort. Sans
+        # ces indexes, chaque list (templates/jobs/tags) fait un scan
+        # full table → la perf s'écroule dès qu'on a 1000+ rows. SQLite
+        # supporte CREATE INDEX IF NOT EXISTS donc idempotent au boot.
+        index_statements = [
+            "CREATE INDEX IF NOT EXISTS ix_templates_owner_id ON templates(owner_id)",
+            "CREATE INDEX IF NOT EXISTS ix_render_jobs_owner_id ON render_jobs(owner_id)",
+            "CREATE INDEX IF NOT EXISTS ix_render_jobs_status ON render_jobs(status)",
+            "CREATE INDEX IF NOT EXISTS ix_render_jobs_created_at ON render_jobs(created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_tags_owner_id ON tags(owner_id)",
+        ]
+        with engine.begin() as conn:
+            for stmt in index_statements:
+                conn.execute(text(stmt))
+        _step(f"    + {len(index_statements)} indexes ensured")
         _step("    [OK] migrations OK")
     except Exception as e:
         _step(f"    [FAIL] migrations failed: {e}")

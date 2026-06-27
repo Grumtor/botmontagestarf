@@ -140,8 +140,11 @@ class Template(Base):
     # Les queries CRUD filtrent toujours par owner_id == current_user.
     # nullable=True le temps de la migration de la DB existante ; le code
     # post-bootstrap garantit que chaque ligne a un owner.
+    # Phase 39 — index sur owner_id : tous les list templates filtrent
+    # par cette colonne, sans index = scan full table à chaque page.
     owner_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+        Integer, ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True, index=True,
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -221,14 +224,19 @@ class RenderJob(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     # Phase 33 — multi-tenant. Le job est owned par l'user qui l'a lancé.
+    # Phase 39 — index : /jobs filter par owner_id sur chaque list.
     owner_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+        Integer, ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True, index=True,
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
+    # Phase 39 — index : worker requête `WHERE status='queued'` pour
+    # pop le prochain job, et l'UI filtre par status.
     status: Mapped[JobStatus] = mapped_column(
         SAEnum(JobStatus, name="job_status"),
         default=JobStatus.queued,
         nullable=False,
+        index=True,
     )
     # Phase 38 — kind = "render" (template-based batch, the historical
     # default, costs 1 credit per output) OR "spoof" (just apply

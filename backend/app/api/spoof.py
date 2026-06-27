@@ -65,6 +65,17 @@ def create_spoof_batch(
             f"tu en as envoyé {n}.",
         )
 
+    # Phase 39 — anti cross-tenant : chaque token doit avoir été créé
+    # par CET user (préfixe `u{user.id}_` posé par /api/render/upload).
+    user_prefix = f"u{user.id}_"
+    bad = [t for t in payload.tokens if not (isinstance(t, str) and t.startswith(user_prefix))]
+    if bad:
+        raise HTTPException(
+            400,
+            "Token d'upload invalide (pas le tien ou expiré). "
+            "Re-upload tes vidéos.",
+        )
+
     # Force the spoof to be ON. The whole point of this endpoint is
     # the spoof — if the user didn't enable it explicitly in the UI
     # we still apply the metadata pass (cheaper to ignore than to

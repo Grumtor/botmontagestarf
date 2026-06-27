@@ -83,7 +83,14 @@ async def upload_user_video(
     # startup but a fresh volume / re-deploy could leave it missing.
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-    token = uuid.uuid4().hex
+    # Phase 39 — préfixe `u{user_id}_` sur le token pour anti-cross-
+    # tenant : create_batch / create_spoof_batch valide que chaque
+    # token soumis matche le préfixe du user authenticated. Sinon un
+    # user A pourrait deviner / intercepter le token de user B et
+    # render avec sa vidéo. Le préfixe est checké dans l'API, pas
+    # dans le worker (qui consomme les tokens sans connaître le
+    # user — l'autorisation se fait UNE FOIS à la création du job).
+    token = f"u{user.id}_{uuid.uuid4().hex}"
     dest = TEMP_DIR / f"{token}{ext}"
 
     total = 0

@@ -54,7 +54,10 @@ class UserSummary(BaseModel):
     role: UserRole
     priority: UserPriority
     max_templates: Optional[int]
-    render_credits: int
+    # Phase 39 — Float depuis Phase 38 (0.5 crédit/spoof). Avant : int
+    # qui tronquait silencieusement les .5 → admin voyait "12 crédits"
+    # alors que la DB en avait 12.5.
+    render_credits: float
     is_active: bool
     # extra computed counts for the admin table view
     template_count: int = 0
@@ -68,7 +71,7 @@ class UserCreate(BaseModel):
     priority: UserPriority = UserPriority.normal
     # null = unlimited. Default 5 for new regular users.
     max_templates: Optional[int] = Field(default=5, ge=0)
-    render_credits: int = Field(default=50, ge=0)
+    render_credits: float = Field(default=50.0, ge=0)
 
 
 class UserUpdate(BaseModel):
@@ -79,7 +82,7 @@ class UserUpdate(BaseModel):
     role: Optional[UserRole] = None
     priority: Optional[UserPriority] = None
     max_templates: Optional[int] = Field(default=None, ge=0)
-    render_credits: Optional[int] = Field(default=None, ge=0)
+    render_credits: Optional[float] = Field(default=None, ge=0)
     is_active: Optional[bool] = None
 
 

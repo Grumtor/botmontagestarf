@@ -76,6 +76,9 @@ export const UserMeSchema = z.object({
   role: z.enum(["admin", "user"]),
   priority: z.enum(["high", "normal", "low"]),
   max_templates: z.number().nullable(),
+  // Phase 39 — float (Phase 38 : 0.5 crédit pour un spoof). z.number()
+  // accepte les deux (Zod's z.number() = JS number, float ou int).
+  // Le helper formatCredits() côté UI gère l'affichage "12" ou "12.5".
   render_credits: z.number(),
   is_active: z.boolean(),
   // Phase 35 — UI language preference. May be absent for users

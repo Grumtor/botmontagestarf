@@ -35,6 +35,11 @@ def _set_sqlite_pragmas(dbapi_connection, _connection_record):
         cur.execute("PRAGMA journal_mode=WAL")
         cur.execute("PRAGMA synchronous=NORMAL")
         cur.execute("PRAGMA foreign_keys=ON")
+        # Phase 39 — busy_timeout=5s : si une autre connexion tient le
+        # lock (le worker render fait un commit en plein milieu d'un
+        # SELECT API), on attend jusqu'à 5s au lieu de raise
+        # SQLITE_BUSY immédiatement. Évite les 500 random sous charge.
+        cur.execute("PRAGMA busy_timeout=5000")
     finally:
         cur.close()
 

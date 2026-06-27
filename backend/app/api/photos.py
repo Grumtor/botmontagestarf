@@ -25,6 +25,7 @@ from typing import Optional
 from fastapi import (
     APIRouter,
     BackgroundTasks,
+    Depends,
     File,
     Form,
     HTTPException,
@@ -32,7 +33,9 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse
 
+from app.db.models import User
 from app.render.photo_metadata import apply_photo_metadata
+from app.users import require_user
 
 router = APIRouter(prefix="/api/photos", tags=["photos"])
 
@@ -67,6 +70,11 @@ async def spoof_photos(
     # noms originaux.
     naming: str = Form("iphone"),
     background_tasks: BackgroundTasks = None,  # type: ignore[assignment]
+    # Phase 39 sécurité — endpoint ouvert au monde sans auth jusqu'ici
+    # (data leak + spoof anonyme illimité). Désormais require_user :
+    # cookie session valide obligatoire, sinon 401. NB : pas de débit
+    # crédits ici pour l'instant (à ajouter dans une 2e passe).
+    user: User = Depends(require_user),
 ):
     if not files:
         raise HTTPException(400, "No files provided")
