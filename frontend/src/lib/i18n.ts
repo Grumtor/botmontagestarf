@@ -209,6 +209,8 @@ const fr: Dict = {
   "render.wizard.select_all": "Tout sélectionner",
   "render.wizard.clear": "Vider",
   "render.wizard.no_templates": "Aucun template avec placeholder pour ce filtre. Crée un template avec au moins 1 placeholder pour batch-render.",
+  "render.wizard.no_placeholder.title": "{n} template(s) masqué(s) ici",
+  "render.wizard.no_placeholder.desc": "Ces templates n'ont pas de zone vidéo (placeholder) à remplir, donc on ne peut pas y injecter tes vidéos source. Ouvre-les dans l'éditeur et ajoute un clip « placeholder » pour qu'ils apparaissent au render.",
   "render.wizard.no_videos": "Aucune vidéo prête. Reviens à l'étape 1.",
   "render.wizard.no_placeholder_templates": "Aucun template avec placeholder.",
   "render.wizard.no_preview": "Pas d'aperçu",
@@ -279,8 +281,11 @@ const fr: Dict = {
   "spoof.launch": "Lancer le spoof",
   "spoof.launching": "Lancement…",
   "spoof.cost": "{n} vidéos × 0.5 = {total} crédits",
+  "spoof.cost_copies": "{n} vidéos × {c} copies × 0.5 = {total} crédits",
   "spoof.insufficient_credits": "{missing} crédits manquants",
   "spoof.empty_upload": "Drop au moins une vidéo pour continuer",
+  "spoof.copies.label": "Copies par vidéo",
+  "spoof.copies.hint": "chaque copie = metadata différente (multi-comptes)",
 
   // ----- jobs / render history -----
   "jobs.title": "Mes rendus",
@@ -652,6 +657,8 @@ const en: Dict = {
   "render.wizard.select_all": "Select all",
   "render.wizard.clear": "Clear",
   "render.wizard.no_templates": "No template with a placeholder for this filter. Create a template with at least 1 placeholder for batch rendering.",
+  "render.wizard.no_placeholder.title": "{n} template(s) hidden here",
+  "render.wizard.no_placeholder.desc": "These templates have no video slot (placeholder) to fill, so we can't inject your source videos into them. Open them in the editor and add a \"placeholder\" clip so they show up at render time.",
   "render.wizard.no_videos": "No ready video. Go back to step 1.",
   "render.wizard.no_placeholder_templates": "No template with placeholder.",
   "render.wizard.no_preview": "No preview",
@@ -722,8 +729,11 @@ const en: Dict = {
   "spoof.launch": "Launch spoof",
   "spoof.launching": "Launching…",
   "spoof.cost": "{n} videos × 0.5 = {total} credits",
+  "spoof.cost_copies": "{n} videos × {c} copies × 0.5 = {total} credits",
   "spoof.insufficient_credits": "{missing} credits missing",
   "spoof.empty_upload": "Drop at least one video to continue",
+  "spoof.copies.label": "Copies per video",
+  "spoof.copies.hint": "each copy = different metadata (multi-account)",
 
   // ----- jobs / render history -----
   "jobs.title": "My renders",

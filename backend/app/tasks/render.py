@@ -305,14 +305,16 @@ def process_render_job(job_id: int) -> None:
             db.commit()
             return
 
-        # ZIP all outputs. Phase 29 — Apple-style naming optionnel +
-        # group by pass when max_gen > 1 (each pass in its own subdir).
-        # Le label du sous-dossier vient de `metadata_profile.pass_label`
-        # — "Generation" par défaut (generations multiplier), "Tirage"
-        # pour le random reroll (Phase 29c).
+        # ZIP all outputs.
+        #
+        # Phase 40 — ZIP TOUJOURS PLAT. Avant, quand generations > 1 on
+        # groupait chaque pass dans un sous-dossier `Generation N/`.
+        # L'utilisateur (agence) veut un seul dossier avec TOUS les
+        # fichiers dedans, pas 10 sous-dossiers à ouvrir un par un. Les
+        # noms de fichiers sont déjà uniques (compteur continu en mode
+        # iphone, suffixe `_g{n}` + index unique en mode default) donc
+        # pas de collision en plat.
         naming = str(metadata_profile.get("naming") or "default").lower()
-        pass_label = str(metadata_profile.get("pass_label") or "Generation")
-        multi_gen = max_gen > 1
         zip_path = RENDERS_DIR / f"{job.id}.zip"
         # Sort primary by gen_idx (groups passes when generations > 1),
         # secondary by the original assignment index — preserves the
@@ -340,14 +342,11 @@ def process_render_job(job_id: int) -> None:
                 counter += 1
 
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
-            for f, gen_idx, _order_idx in sorted_entries:
-                base_arc = (
-                    apple_name_by_path[f] if naming == "iphone" else Path(f).name
-                )
+            for f, _gen_idx, _order_idx in sorted_entries:
+                # Phase 40 — plat : l'arcname est juste le nom de fichier,
+                # jamais un `Generation N/{...}`.
                 arcname = (
-                    f"{pass_label} {gen_idx}/{base_arc}"
-                    if multi_gen
-                    else base_arc
+                    apple_name_by_path[f] if naming == "iphone" else Path(f).name
                 )
                 zf.write(f, arcname=arcname)
 

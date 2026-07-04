@@ -800,6 +800,8 @@ export type SpoofBatchInput = {
   };
   naming?: "default" | "iphone";
   pass_label?: string;
+  // Phase 40 — nombre de copies spoofées par vidéo (1 = une seule).
+  generations?: number;
 };
 
 export const Spoof = {

@@ -103,6 +103,8 @@ export default function SpoofWizardPage() {
   const [language, setLanguage] = useState("en-US");
   const [dateWindow, setDateWindow] = useState(7);
   const [iphoneNaming, setIphoneNaming] = useState(true);
+  // Phase 40 — nombre de copies spoofées par vidéo (multi-comptes).
+  const [copies, setCopies] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -110,9 +112,9 @@ export default function SpoofWizardPage() {
   const allVideosReady =
     uploads.length > 0 && readyVideos.length === uploads.length;
 
-  // ===== cost (0.5 credit / video) =================================
+  // ===== cost (0.5 credit / video / copie) =========================
 
-  const totalCost = readyVideos.length * Spoof.COST_PER_VIDEO;
+  const totalCost = readyVideos.length * copies * Spoof.COST_PER_VIDEO;
   const creditsShortBy =
     me && me.role !== "admin"
       ? Math.max(0, totalCost - me.render_credits)
@@ -201,6 +203,7 @@ export default function SpoofWizardPage() {
           date_window_days: dateWindow,
         },
         naming: iphoneNaming ? "iphone" : "default",
+        generations: copies,
       });
       // Le backend a décrémenté les crédits → notifier la sidebar.
       notifyUserRefresh();
@@ -260,6 +263,8 @@ export default function SpoofWizardPage() {
             setDateWindow={setDateWindow}
             iphoneNaming={iphoneNaming}
             setIphoneNaming={setIphoneNaming}
+            copies={copies}
+            setCopies={setCopies}
             videoCount={readyVideos.length}
             totalCost={totalCost}
             insufficientCredits={insufficientCredits}
@@ -501,6 +506,8 @@ function Step2Options({
   setDateWindow,
   iphoneNaming,
   setIphoneNaming,
+  copies,
+  setCopies,
   videoCount,
   totalCost,
   insufficientCredits,
@@ -521,6 +528,8 @@ function Step2Options({
   setDateWindow: (n: number) => void;
   iphoneNaming: boolean;
   setIphoneNaming: (b: boolean) => void;
+  copies: number;
+  setCopies: (n: number) => void;
   videoCount: number;
   totalCost: number;
   insufficientCredits: boolean;
@@ -608,6 +617,48 @@ function Step2Options({
           />
         </label>
 
+        {/* Phase 40 — copies par vidéo (multi-comptes). Chaque copie a
+            une metadata iPhone re-randomisée → fingerprint différent. */}
+        <div className="flex flex-col gap-1 text-xs">
+          <span className="text-muted-foreground">
+            {t("spoof.copies.label")}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCopies(Math.max(1, copies - 1))}
+              disabled={copies <= 1}
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-lg transition hover:bg-accent/50 disabled:opacity-40"
+              aria-label="-"
+            >
+              −
+            </button>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={copies}
+              onChange={(e) => {
+                const v = Math.round(Number(e.target.value));
+                setCopies(Math.max(1, Math.min(20, Number.isFinite(v) ? v : 1)));
+              }}
+              className="h-8 w-16 rounded-md border border-border bg-background text-center"
+            />
+            <button
+              type="button"
+              onClick={() => setCopies(Math.min(20, copies + 1))}
+              disabled={copies >= 20}
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-lg transition hover:bg-accent/50 disabled:opacity-40"
+              aria-label="+"
+            >
+              +
+            </button>
+            <span className="text-[10px] text-muted-foreground">
+              {t("spoof.copies.hint")}
+            </span>
+          </div>
+        </div>
+
         {/* Naming radio : "iphone" (IMG_xxxx.MOV) ou "default" (garde
             le nom source). Représenté comme un toggle deux options. */}
         <div className="grid grid-cols-2 gap-2">
@@ -653,10 +704,16 @@ function Step2Options({
       {/* Cost display */}
       <div className="rounded-md border border-border bg-card p-4 text-sm">
         <div className="font-medium">
-          {t("spoof.cost", {
-            n: videoCount,
-            total: formatCredits(totalCost),
-          })}
+          {copies > 1
+            ? t("spoof.cost_copies", {
+                n: videoCount,
+                c: copies,
+                total: formatCredits(totalCost),
+              })
+            : t("spoof.cost", {
+                n: videoCount,
+                total: formatCredits(totalCost),
+              })}
         </div>
         {insufficientCredits && (
           <p className="mt-1 text-[11px] text-destructive">

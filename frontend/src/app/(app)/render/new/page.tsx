@@ -150,6 +150,16 @@ export default function RenderWizardPage() {
     return (allTemplates ?? []).filter((t) => getPlaceholders(t).length > 0);
   }, [allTemplates]);
 
+  // Phase 40 — templates SANS placeholder : ils n'apparaissent pas dans
+  // le wizard (rien à remplir avec la vidéo source). Avant, ils étaient
+  // masqués sans explication → l'user croyait que son template avait
+  // disparu. On remonte leurs noms pour afficher un bandeau explicatif.
+  const noPlaceholderNames = useMemo(() => {
+    return (allTemplates ?? [])
+      .filter((t) => getPlaceholders(t).length === 0)
+      .map((t) => t.name);
+  }, [allTemplates]);
+
   // Phase 37c — Source = library `/api/tags` ∪ tags des usableTemplates.
   // Permet de voir tous les tags déclarés (même ceux pas encore
   // appliqués) dans la barre de filtres du wizard. Trié alpha
@@ -471,6 +481,7 @@ export default function RenderWizardPage() {
             onClearTags={() => setActiveTags(new Set())}
             tags={wizardTags}
             templates={visibleTemplates}
+            noPlaceholderNames={noPlaceholderNames}
             allTemplatesLoaded={allTemplates !== null}
             selectedIds={selectedIds}
             onToggle={toggleTemplate}
@@ -753,6 +764,7 @@ function Step2Templates({
   onClearTags,
   tags,
   templates,
+  noPlaceholderNames,
   allTemplatesLoaded,
   selectedIds,
   onToggle,
@@ -769,6 +781,7 @@ function Step2Templates({
   onClearTags: () => void;
   tags: string[];
   templates: Template[];
+  noPlaceholderNames: string[];
   allTemplatesLoaded: boolean;
   selectedIds: Set<number>;
   onToggle: (id: number) => void;
@@ -882,6 +895,25 @@ function Step2Templates({
               </button>
             );
           })}
+        </div>
+      )}
+
+      {/* Phase 40 — bandeau explicatif : les templates sans zone vidéo
+          (placeholder) n'apparaissent pas dans le render, on dit
+          pourquoi + comment fixer. */}
+      {allTemplatesLoaded && noPlaceholderNames.length > 0 && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100">
+          <div className="font-medium">
+            {t("render.wizard.no_placeholder.title", {
+              n: noPlaceholderNames.length,
+            })}
+          </div>
+          <p className="mt-1 text-amber-200/80">
+            {t("render.wizard.no_placeholder.desc")}
+          </p>
+          <p className="mt-1 text-amber-200/60">
+            {noPlaceholderNames.join(", ")}
+          </p>
         </div>
       )}
 

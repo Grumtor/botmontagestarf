@@ -139,10 +139,13 @@ async def spoof_photos(
         out_root.mkdir()
 
         for gen in range(generations):
-            # `gen_subdir` = préfixe pour cette génération.
-            # Vide quand generations=1 (tout à la racine).
-            gen_subdir = f"Generation {gen + 1}" if generations > 1 else ""
-            target_dir = out_root / gen_subdir if gen_subdir else out_root
+            # Phase 40 — ZIP PLAT : plus de sous-dossier `Generation N/`.
+            # Tout va à la racine du ZIP. Quand generations > 1, on ajoute
+            # un suffixe `_g{n}` au nom de fichier pour éviter les
+            # collisions (2 copies de la même photo source). L'user
+            # voulait un seul dossier, pas un par génération.
+            gen_suffix = f"_g{gen + 1}" if generations > 1 else ""
+            target_dir = out_root
             target_dir.mkdir(parents=True, exist_ok=True)
 
             for src, ext in sources:
@@ -154,7 +157,7 @@ async def spoof_photos(
                     "date_window_days": date_window_days,
                 }
                 stem = Path(_safe_name(src.name)).stem
-                dst = target_dir / f"{stem}{ext}"
+                dst = target_dir / f"{stem}{gen_suffix}{ext}"
                 try:
                     shutil.copy(src, dst)
                 except Exception as e:

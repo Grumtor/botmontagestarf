@@ -49,6 +49,11 @@ class SpoofBatchRequest(BaseModel):
     metadata_profile: MetadataProfile = Field(default_factory=MetadataProfile)
     naming: str = "default"        # "default" | "iphone"
     pass_label: str = "Generation"
+    # Phase 40 — nombre de copies spoofées PAR vidéo. Use case agence :
+    # 1 vidéo → 5 variantes (metadata différente à chaque fois) pour
+    # 5 comptes distincts. Coût = 0.5 × vidéos × copies. Tout sort à
+    # plat dans le ZIP (pas de sous-dossier).
+    generations: int = Field(default=1, ge=1, le=20)
 
 
 @router.post("/batch", response_model=JobRead)
@@ -86,27 +91,39 @@ def create_spoof_batch(
     metadata_profile["naming"] = payload.naming
     metadata_profile["pass_label"] = payload.pass_label
 
-    # 0.5 credit × N videos. We allow fractional balances thanks to the
-    # Float column (Phase 38). Reject if insufficient — same UX as
-    # the render batch endpoint.
-    cost = SPOOF_COST_PER_VIDEO * n
+    # Phase 40 — le total d'outputs = vidéos × copies. On cap au même
+    # plafond que le render batch.
+    gens = payload.generations
+    total_outputs = n * gens
+    if total_outputs > MAX_RENDERS_PER_BATCH:
+        raise HTTPException(
+            400,
+            f"Max {MAX_RENDERS_PER_BATCH} outputs par batch — tu as "
+            f"demandé {n} vidéos × {gens} copies = {total_outputs}.",
+        )
+
+    # 0.5 credit × N videos × copies. We allow fractional balances thanks
+    # to the Float column (Phase 38). Reject if insufficient.
+    cost = SPOOF_COST_PER_VIDEO * total_outputs
     if user.render_credits < cost:
         raise HTTPException(
             status_code=402,
             detail=(
                 f"Crédits insuffisants : il te faut {cost:g} crédits "
-                f"({n} vidéos × 0.5), tu en as {user.render_credits:g}. "
-                f"Demande à l'admin d'en ajouter."
+                f"({n} vidéos × {gens} copies × 0.5), tu en as "
+                f"{user.render_credits:g}. Demande à l'admin d'en ajouter."
             ),
         )
 
-    # Build one assignment per video : { token, gen_idx=1 }. The render
-    # worker (tasks/render.py) detects job.kind == "spoof" and skips
-    # the full ffmpeg pipeline, just copying the upload and running
-    # apply_quicktime_metadata on it.
+    # Build one assignment per (video, copy). The render worker
+    # (tasks/render.py) detects job.kind == "spoof" and skips the full
+    # ffmpeg pipeline, just copying the upload and running
+    # apply_quicktime_metadata on it (metadata re-randomisée à chaque
+    # copie → chaque variante a un fingerprint iPhone différent).
     assignments = [
-        {"token": tok, "gen_idx": 1, "_gen": 1}
+        {"token": tok, "gen_idx": g + 1, "_gen": g + 1}
         for tok in payload.tokens
+        for g in range(gens)
     ]
 
     job = RenderJob(
